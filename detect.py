@@ -2,10 +2,13 @@
 # authors: eablonet
 # date : 2019
 """
-import Stack as st
-
+# global packages
 import matplotlib.pyplot as plt
 import numpy as np
+
+# local packages
+import packages.main.Stack as st
+
 s = st.Stack()
 
 s.read_by_path('29-03-2018', 9)

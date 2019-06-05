@@ -29,8 +29,8 @@ Stack
 """
 
 
-# packages
-# --------
+# global packages
+# ---------------
 import sys
 import os
 import glob
@@ -41,10 +41,6 @@ import progressbar
 
 from matplotlib.backends.qt_compat import QtWidgets
 from PySide2.QtWidgets import (QApplication, QFileDialog, QWidget)
-
-# import PeakDetection as pf
-import ImageProcessing as ip
-# import StefanSolver as ste2
 
 from matplotlib import pyplot as plt
 
@@ -58,10 +54,15 @@ from scipy import ndimage
 
 import pandas as ps
 
-import LineBuilder as lb
-import DraggrableRectangle as drag
-import ClaheWindow as cw
-import Geometry as geom
+# local packages
+# --------------
+from . import ImageProcessing as ip
+
+from ..geometrybuilder import LineBuilder as lb
+from ..geometrybuilder import DraggrableRectangle as drag
+from ..geometrybuilder import Geometry as geom
+
+from ..gui import ClaheWindow as cw
 
 # code
 # ----
@@ -77,7 +78,7 @@ class Stack(object):
 
     Methods
     -------
-
+    lot of
     """
 
     def __init__(self):

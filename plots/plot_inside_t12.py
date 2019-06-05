@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 Plot inside the chamber cinetic adim by t12.
 
@@ -11,11 +9,12 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import pandas as pd
 
-from ..main import Stack as st
-from ..main import Stefan as ste
-from ..main import Material as ma
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
+
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 

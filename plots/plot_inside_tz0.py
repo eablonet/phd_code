@@ -1,4 +1,6 @@
 """
+Plot inside the chamber cinetic adim by t12.
+
 author : eablonet
 date : 2019
 """
@@ -6,15 +8,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import pandas as pd
-import Stack as st
-import Stefan as ste
-import Material as ma
+
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
 
+
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
-z_lookfor = .5
+z_lookfor = 1
 
 # ice
 ice = ma.Ice()
@@ -66,7 +70,8 @@ for _, row in manip_data.iterrows():
     cond = (
         row['completed_2'] == 1 and
         row['lieu'] == 1 and
-        row['type'] == 'a'
+        row['type'] == 'a' and
+        row['ref'] != 'Cuve20a'
         # row['completed_2'] == 1 and  # front detected
     )
     if cond:
@@ -322,16 +327,16 @@ ax3.legend(
 )
 
 # labels
-ax0.set_xlabel(r'$t/t_{1/2}$', fontsize=18)
+ax0.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
 ax0.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax1.set_xlabel(r'$t/t_{1/2}$', fontsize=18)
+ax1.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
 ax1.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax2.set_xlabel(r'$t/t_{1/2}$', fontsize=18)
+ax2.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
 ax2.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax3.set_xlabel(r'$t/t_{1/2}$', fontsize=18)
+ax3.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
 ax3.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
 # grids
@@ -341,16 +346,16 @@ ax2.grid(True)
 ax3.grid(True)
 
 # x/y limits
-ax0.set_xlim([-.5, 6])
+ax0.set_xlim([-.5, 3])
 ax0.set_ylim([-.1, 1.5])
 
-ax1.set_xlim([-.5, 6])
+ax1.set_xlim([-.5, 3])
 ax1.set_ylim([-.1, 1.5])
 
-ax2.set_xlim([-.5, 6])
+ax2.set_xlim([-.5, 3])
 ax2.set_ylim([-.1, 1.5])
 
-ax3.set_xlim([-.5, 6])
+ax3.set_xlim([-.5, 3])
 ax3.set_ylim([-.1, 1.5])
 
 # show

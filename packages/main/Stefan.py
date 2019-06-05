@@ -11,11 +11,11 @@ class
 """
 
 from numpy import sqrt, linspace, zeros, pi, exp, cos, arccos
-import Material as ma
 from matplotlib import pyplot as plt
-
 from scipy.special import erf, erfc
 from scipy import optimize as op
+
+from . import Material as ma
 
 
 class Stefan(object):

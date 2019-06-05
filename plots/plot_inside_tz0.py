@@ -72,7 +72,6 @@ for _, row in manip_data.iterrows():
         row['lieu'] == 1 and
         row['type'] == 'a' and
         row['ref'] != 'Cuve20a'
-        # row['completed_2'] == 1 and  # front detected
     )
     if cond:
         print('Found :', row['date'], 'n', row['serie'])

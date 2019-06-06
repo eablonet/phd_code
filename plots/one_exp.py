@@ -10,14 +10,14 @@ import pandas as pd
 
 # local packages
 # --------------
-from ..packages.main import Stack as st
-from ..packages.main import Stefan as ste
-from ..packages.main import Material as ma
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
 """
 Physical Parameters
 """
-date = '22-11-2018'
-serie = 1
+date = '15-10-2018'
+serie = 3
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 

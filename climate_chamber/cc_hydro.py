@@ -24,16 +24,6 @@ for _, row in cc_data.iterrows():
     x.append(row.values[0])
     y.append(row.values[1])
 
-
-x_manip_1 = []
-y_manip_1 = []
-x_manip_2 = []
-y_manip_2 = []
-x_manip_3 = []
-y_manip_3 = []
-x_manip_4 = []
-y_manip_4 = []
-
 plt.figure(figsize=[8, 5])
 
 # plot the area available by the chamber
@@ -71,10 +61,14 @@ for _, row in manip_data.iterrows():
             marker=treated[row['completed_2']],
         )
 
-
-
 plt.xlabel(r'$\phi$ (%)')
 plt.ylabel(r'$T_a$ (°C)')
+
+phi = np.arange(5, 80)
+plt.plot(
+    phi, 50-.5*phi, '--r',
+    label='Limit of manipulation'
+)
 
 plt.title('Climate chamber hygrometry')
 plt.ylim([1, 40])

@@ -2,14 +2,17 @@
 author : eablonet
 date : 2019
 """
+# global packages
+# ---------------
 import numpy as np
 import matplotlib.pyplot as plt
-# from scipy.special import erf
-# import scipy.optimize as op
 import pandas as pd
-import Stack as st
-import Stefan as ste
-import Material as ma
+
+# local packages
+# --------------
+from ..packages.main import Stack as st
+from ..packages.main import Stefan as ste
+from ..packages.main import Material as ma
 """
 Physical Parameters
 """

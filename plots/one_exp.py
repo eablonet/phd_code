@@ -2,19 +2,22 @@
 author : eablonet
 date : 2019
 """
+# global packages
+# ---------------
 import numpy as np
 import matplotlib.pyplot as plt
-# from scipy.special import erf
-# import scipy.optimize as op
 import pandas as pd
-import Stack as st
-import Stefan as ste
-import Material as ma
+
+# local packages
+# --------------
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
 """
 Physical Parameters
 """
-date = '22-11-2018'
-serie = 1
+date = '15-10-2018'
+serie = 3
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 

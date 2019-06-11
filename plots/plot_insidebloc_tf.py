@@ -12,6 +12,7 @@ import pandas as pd
 from packages.main import Stack as st
 from packages.main import Stefan as ste
 from packages.main import Material as ma
+from packages.main import read_online_data as rd
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
 
@@ -19,6 +20,7 @@ rcParams.update({'figure.autolayout': True})  # enable tight layout
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
 z_lookfor = 1
+x_max = 1.5
 
 # ice
 ice = ma.Ice()
@@ -34,7 +36,7 @@ k_l = water.get_k()
 cp_l = water.get_cp()
 
 # solver
-manip_data = pd.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
+manip_data = rd.get_data()
 manip_data.info()
 s = st.Stack()
 
@@ -70,8 +72,7 @@ for _, row in manip_data.iterrows():
     cond = (
         row['completed_2'] == 1 and
         row['lieu'] == 1 and
-        row['type'] == 'a' and
-        row['ref'] != 'Cuve20a'
+        row['type'] == 'e'
     )
     if cond:
         print('Found :', row['date'], 'n', row['serie'])
@@ -107,6 +108,8 @@ for _, row in manip_data.iterrows():
         else:
             phi = int(row['phi'])
 
+        print(phi)
+
         c[row['Ta']] += 1
 
         # read front information
@@ -122,10 +125,10 @@ for _, row in manip_data.iterrows():
 
         time = np.arange(len(zf_mean))/fps
 
-        tf = t_end - t_nuc
+        tf = (t_end - t_nuc)/fps
         time_scale = time - dt_ini/fps
         t12 = time_scale[np.argmin(abs(zf_mean / px_mm / z0 - z_lookfor))]
-        time_scale /= t12
+        time_scale /= tf
 
         if row['Ta'] == 5:
             # tf = t_end - t_nuc
@@ -185,50 +188,50 @@ zs_dip = dip.front_position(adim=True)
 
 t12 = mon.time[np.argmin(abs(zs_mon - z_lookfor))]
 ax0.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax1.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax2.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax3.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 t12 = dip.time[np.argmin(abs(zs_dip - z_lookfor))]
 ax0.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax1.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax2.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax3.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
@@ -326,16 +329,16 @@ ax3.legend(
 )
 
 # labels
-ax0.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax0.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax0.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax1.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax1.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax1.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax2.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax2.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax2.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax3.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax3.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax3.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
 # grids
@@ -345,16 +348,16 @@ ax2.grid(True)
 ax3.grid(True)
 
 # x/y limits
-ax0.set_xlim([-.5, 3])
+ax0.set_xlim([-.05, x_max])
 ax0.set_ylim([-.1, 1.5])
 
-ax1.set_xlim([-.5, 3])
+ax1.set_xlim([-.05, x_max])
 ax1.set_ylim([-.1, 1.5])
 
-ax2.set_xlim([-.5, 3])
+ax2.set_xlim([-.05, x_max])
 ax2.set_ylim([-.1, 1.5])
 
-ax3.set_xlim([-.5, 3])
+ax3.set_xlim([-.05, x_max])
 ax3.set_ylim([-.1, 1.5])
 
 # show

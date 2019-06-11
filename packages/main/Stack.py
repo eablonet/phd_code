@@ -57,6 +57,7 @@ import pandas as ps
 # local packages
 # --------------
 from . import ImageProcessing as ip
+from . import read_online_data as rd
 
 from ..geometrybuilder import LineBuilder as lb
 from ..geometrybuilder import DraggrableRectangle as drag
@@ -102,7 +103,7 @@ class Stack(object):
 
         """
         self.data_directory = None
-        df = ps.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
+        df = rd.get_data()
         if date in list(df['date']):
             if serie in list(df[df['date'] == date]['serie']):
                 self.data_directory = (
@@ -122,9 +123,11 @@ class Stack(object):
             print('Path readed...')
 
         self.create_directory()
-        self.current_image_number = 0
-        print('Current image selected : 1.')
         self.update_lists(regex, ext)
+
+        self.current_image_number = 1
+        self.read_image()
+        print('Current image selected : 1.')
 
     def select_folder(self):
         """
@@ -150,15 +153,47 @@ class Stack(object):
 
     def update_lists(self, regex='cam1_*', ext='.tif'):
         """Update the lists of image, spatiox and Spatio_y."""
-        # image list
-        self.image_list = sorted(glob.glob((
-            self.exporting_directory + 'lastOp/*.npy'
-        )))
+        # check what exists in data_folder #
+        if os.path.isdir(self.data_directory + '_export'):
+            # new procedure of reading # to work on pretreated images
+            listdir = os.listdir(self.data_directory + '_export')
+            print('\t' + str(0) + '. ' + 'Original reader image')
+            c = 1
+            for d in listdir:
+                print('\t' + str(c) + '. ' + d)
+                c += 1
+
+            num = int(input('Select a folder to read : '))
+            if num > 0:
+                self.image_list = sorted(glob.glob((
+                    self.data_directory + '_export/' + listdir[num-1] + '/' +
+                    regex + ext
+                )))
+            else:
+                self.image_list = sorted(glob.glob((
+                    self.exporting_directory + 'lastOp/*.npy'
+                )))
+        else:  # all procedure
+            # image list
+            self.image_list = sorted(glob.glob((
+                self.exporting_directory + 'lastOp/*.npy'
+            )))
 
         if len(self.image_list) < 1:
             self.image_list = sorted(glob.glob((
                 self.data_directory + regex + ext
             )))
+
+        if num == 0:
+            # image list
+            self.image_list = sorted(glob.glob((
+                self.exporting_directory + 'lastOp/*.npy'
+            )))
+
+            if len(self.image_list) < 1:
+                self.image_list = sorted(glob.glob((
+                    self.data_directory + regex + ext
+                )))
 
         self.n_image_tot = len(self.image_list)
         self.range_images = range(1, self.n_image_tot+1)
@@ -207,11 +242,9 @@ class Stack(object):
         """
         if ni == -1:
             ni = self.current_image_number
+
         elif ni in self.range_images:
             self.current_image_number = ni
-            self.current_image = ip.ImageProcessing(
-                    self.image_list[ni-1]  # indexes starts at 0 in python
-            )
         else:
             print(
                 (
@@ -222,6 +255,10 @@ class Stack(object):
                 )
             )
             self.read_image(1)
+
+        self.current_image = ip.ImageProcessing(
+                self.image_list[ni-1]  # indexes starts at 0 in python
+        )
 
     def treatment(self, treatment, *args, plot=True):
         """

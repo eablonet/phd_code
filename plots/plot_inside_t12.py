@@ -12,6 +12,7 @@ import pandas as pd
 from packages.main import Stack as st
 from packages.main import Stefan as ste
 from packages.main import Material as ma
+from packages.main import read_online_data as rd
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
 
@@ -34,7 +35,7 @@ k_l = water.get_k()
 cp_l = water.get_cp()
 
 # solver
-manip_data = pd.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
+manip_data = rd.get_data()
 manip_data.info()
 s = st.Stack()
 
@@ -55,13 +56,13 @@ fig = plt.figure(figsize=[8, 4.5])
 ax3 = fig.add_subplot(1, 1, 1)
 
 colors = {
-    5: 'tab:blue',
+    10: 'tab:blue',
     15: 'tab:orange',
     20: 'tab:green'
 }  # symbols horizontal, inclined, random
 symbols = {40: 'o', 50: '^', 60: 'v', 70: 's', 'nan': 'd'}  # if inclined 10:b, 20:r, 30:m, 45:g
-nivel = {5: 1, 15: 2, 20: 3}
-c = {5: 0, 15: 0, 20: 0}
+nivel = {10: 1, 15: 2, 20: 3}
+c = {10: 0, 15: 0, 20: 0}
 
 Tamb = []
 phi_amb = []
@@ -127,7 +128,7 @@ for _, row in manip_data.iterrows():
         t12 = time_scale[np.argmin(abs(zf_mean / px_mm / z0 - z_lookfor))]
         time_scale /= t12
 
-        if row['Ta'] == 5:
+        if row['Ta'] == 10:
             # tf = t_end - t_nuc
             ax0.plot(
                 time_scale,
@@ -236,7 +237,7 @@ ax3.plot(
 
 # legends
 horizontal = plt.Line2D(
-    (0, 1), (0, 0), color=colors[5], linestyle='', marker='.'
+    (0, 1), (0, 0), color=colors[10], linestyle='', marker='.'
 )
 inclined = plt.Line2D(
     (0, 1), (0, 0), color=colors[15], linestyle='', marker='.'
@@ -272,7 +273,7 @@ ax0.legend(
         stefanline, stefandilatationline,
     ],
     [
-        'Ta = 5°C',
+        'Ta = 10°C',
         r'$\phi$ = 40%', r'$\phi$ = 50%', r'$\phi$ = 60%',
         r'$\phi$ = 70%', r'$\phi$ = n.a.',
         'Stefan Model',
@@ -314,7 +315,7 @@ ax3.legend(
         stefanline, stefandilatationline,
     ],
     [
-        'Ta = 5°C',
+        'Ta = 10°C',
         'Ta = 15°C',
         'Ta = 20°C',
         r'$\phi$ = 40%', r'$\phi$ = 50%', r'$\phi$ = 60%',

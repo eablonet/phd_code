@@ -124,10 +124,10 @@ for _, row in manip_data.iterrows():
 
         time = np.arange(len(zf_mean))/fps
 
-        tf = t_end - t_nuc
+        tf = (t_end - t_nuc)/fps
         time_scale = time - dt_ini/fps
         t12 = time_scale[np.argmin(abs(zf_mean / px_mm / z0 - z_lookfor))]
-        time_scale /= t12
+        time_scale /= tf
 
         if row['Ta'] == 10:
             # tf = t_end - t_nuc
@@ -187,50 +187,50 @@ zs_dip = dip.front_position(adim=True)
 
 t12 = mon.time[np.argmin(abs(zs_mon - z_lookfor))]
 ax0.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax1.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax2.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 ax3.plot(
-    mon.time/t12, zs_mon,
+    mon.time/max(mon.time), zs_mon,
     '-k', linewidth=2,
     label='Stefan Model',
     zorder=5
 )
 t12 = dip.time[np.argmin(abs(zs_dip - z_lookfor))]
 ax0.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax1.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax2.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
 )
 ax3.plot(
-    dip.time/t12, zs_dip,
+    dip.time/max(dip.time), zs_dip,
     '--k', linewidth=2,
     label='Stefan Model with Dilatation',
     zorder=5
@@ -328,16 +328,16 @@ ax3.legend(
 )
 
 # labels
-ax0.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax0.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax0.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax1.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax1.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax1.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax2.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax2.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax2.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
-ax3.set_xlabel(r'$t/t_{z_0}$', fontsize=18)
+ax3.set_xlabel(r'$t/t_{f}$', fontsize=18)
 ax3.set_ylabel(r'$z_f/z_0$', fontsize=18)
 
 # grids

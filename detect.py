@@ -11,14 +11,14 @@ import packages.main.Stack as st
 
 s = st.Stack()
 
-s.read_by_path('20-11-2018', 5)
+s.read_by_path('20-11-2018', 9)
 # s.current_image.show_image()
 
 # s.remove_treatments()
 # s.crop()
 # s.clahe()
 
-# s.tracker()
+s.tracker()
 # s.contour_tracker2()
 
 # zf, pts = s.read_data('contour')

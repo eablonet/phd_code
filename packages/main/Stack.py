@@ -184,17 +184,6 @@ class Stack(object):
                 self.data_directory + regex + ext
             )))
 
-        if num == 0:
-            # image list
-            self.image_list = sorted(glob.glob((
-                self.exporting_directory + 'lastOp/*.npy'
-            )))
-
-            if len(self.image_list) < 1:
-                self.image_list = sorted(glob.glob((
-                    self.data_directory + regex + ext
-                )))
-
         self.n_image_tot = len(self.image_list)
         self.range_images = range(1, self.n_image_tot+1)
 

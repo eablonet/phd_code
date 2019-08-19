@@ -9,25 +9,21 @@ import numpy as np
 # local packages
 import packages.main.Stack as st
 
+"""Load images"""
 s = st.Stack()
 
-s.read_by_path('20-11-2018', 9)
-# s.current_image.show_image()
+s.read_by_date('20-11-2017', 7)
+s.load_images()  # not needed if images are not needed
 
+"""Image treatment."""
 # s.remove_treatments()
 # s.crop()
 # s.clahe()
 
 s.tracker()
-# s.contour_tracker2()
 
-# zf, pts = s.read_data('contour')
-# t, zf, zf_loc, _ = s.get_dynamic_front(zf, 300)
-#
-# plt.plot(range(0, len(zf_loc)), zf_loc)
-# plt.show()
-#
-#
+
+"""Read/screen data."""
 zf = s.read_data('front')
 t, zf_loc, zf_mean, zf_std = s.get_dynamic_front(zf)
 Lf = 333550

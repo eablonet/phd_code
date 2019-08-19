@@ -27,15 +27,31 @@ class SplineBuilder(object):
 
     """
 
-    def __init__(self, ax1, ax2, ax3, ax4):
+    def __init__(
+        self,
+        ax1, ax2, ax3, ax4, image, grad, grady,
+        ax, intensity, z_intensity, r_intensity
+    ):
         """Do the initiation."""
+        self.axes = [ax1, ax2, ax3, ax4]
+        self.axes2 = ax
+
+        self.image = image
+        self.grad = grad
+        self.grady = grady
+
+        self.sel_ax_zoom = 0
+
+        self.intensity = intensity
+        self.z_intensity = z_intensity
+        self.r_intensity = r_intensity
+
+        self.press = False  # init press indicator
+
         self.dep_mode = False  # at init no point is selected
         self.selected = [False, []]
         # first indicate if there is a selected point,
         # if True the second indicata is index
-
-        self.values = ax2.get_images()[0].get_array()
-        print(self.values)
 
         # line 1 #
         self.ax1 = ax1
@@ -45,14 +61,12 @@ class SplineBuilder(object):
         self.line1.set_linewidth(.8)
 
         self.pt1 = ax1.plot([], [])[0]
-        print(self.pt1)
         self.pt1.set_linestyle('None')
         self.pt1.set_marker('o')
         self.pt1.set_markeredgecolor('b')
 
         self.dp1 = ax1.plot([], [])[0]
-        print(self.dp1)
-        self.pt1.set_linestyle('None')
+        self.dp1.set_linestyle('None')
         self.dp1.set_marker('s')
         self.dp1.set_markeredgecolor('r')
         self.dp1.set_markerfacecolor('none')
@@ -69,15 +83,12 @@ class SplineBuilder(object):
         self.pt2.set_markeredgecolor('b')
 
         # line 3 #
-        self.line3 = ax3.plot([], [])[0]
-        self.line3.set_linestyle('-')
-        self.line3.set_color('b')
-        self.line3.set_linewidth(.8)
-
-        self.pt3 = ax3.plot([], [])[0]
-        self.pt3.set_linestyle('None')
-        self.pt3.set_marker('o')
-        self.pt3.set_markeredgecolor('b')
+        self.cross_x = ax3.plot(
+            [], [], ls='-', color='tab:red', lw=2
+        )[0]  # x(cste)
+        self.cross_y = ax3.plot(
+            [], [], ls='-', color='tab:red', lw=2
+        )[0]  # y(cste)
 
         # line 4 #
         self.line4 = ax4.plot([], [])[0]
@@ -90,6 +101,21 @@ class SplineBuilder(object):
         self.pt4.set_marker('o')
         self.pt4.set_markeredgecolor('b')
 
+        self.dots = []
+        for a in self.axes2:
+            self.dots.append(
+                a.plot(
+                    [], [],
+                    ls='None',
+                    marker='o', ms=6, color='tab:red', mfc='None'
+                )[0]
+            )
+
+        # enable connections
+        # ------------------
+        self.cid1 = self.ax1.figure.canvas.mpl_connect(
+            'button_press_event', self.enable_press
+        )
         self.cid1 = self.ax1.figure.canvas.mpl_connect(
             'button_release_event', self.on_press
         )
@@ -97,26 +123,32 @@ class SplineBuilder(object):
             'key_release_event', self.on_press_key
         )
 
+        self.cid1_move = self.ax1.figure.canvas.mpl_connect(
+            'motion_notify_event', self.on_motion
+        )
+
+        self.cid2 = self.axes2[0].figure.canvas.mpl_connect(
+            'button_release_event', self.on_press_intensity
+        )
+
         self.xs = np.array(self.line1.get_xdata(), dtype=np.int)
         self.ys = np.array(self.line1.get_ydata(), dtype=np.int)
         self.xs_interp = np.array(self.line1.get_xdata(), dtype=np.int)
         self.ys_interp = np.array(self.line1.get_ydata(), dtype=np.int)
 
+    def enable_press(self, event):
+        self.press = True
+
     def update_fig(self):
         """Update the figure."""
         self.pt1.set_data(self.xs, self.ys)
         self.pt2.set_data(self.xs, self.ys)
-        self.pt3.set_data(self.xs, self.ys)
         self.pt4.set_data(self.xs, self.ys)
 
         self.line1.set_data(self.xs_interp, self.ys_interp)
         self.line2.set_data(self.xs_interp, self.ys_interp)
-        self.line3.set_data(self.xs_interp, self.ys_interp)
         self.line4.set_data(self.xs_interp, self.ys_interp)
 
-        self.line1.figure.canvas.draw()
-        self.line2.figure.canvas.draw()
-        self.line3.figure.canvas.draw()
         self.line4.figure.canvas.draw()
 
     def interpolate(self):
@@ -143,14 +175,23 @@ class SplineBuilder(object):
             Right to remove the last one.
 
         """
+        print(event.button)
+        if self.press is False:
+            return
+        else:
+            self.press = False
+
         zoom_cond = (
-            self.line1.axes.get_navigate_mode() != 'ZOOM' or
-            self.line2.axes.get_navigate_mode() != 'ZOOM' or
-            self.line3.axes.get_navigate_mode() != 'ZOOM' or
-            self.line4.axes.get_navigate_mode() != 'ZOOM'
+            self.line1.axes.get_navigate_mode() == 'ZOOM' or
+            self.line2.axes.get_navigate_mode() == 'ZOOM' or
+            self.line4.axes.get_navigate_mode() == 'ZOOM'
         )
+
+        if zoom_cond:
+            return
+
         if event.inaxes not in [
-            self.line1.axes, self.line2.axes, self.line3.axes, self.line4.axes,
+            self.line1.axes, self.line2.axes, self.line4.axes,
         ]:
             return
 
@@ -162,7 +203,7 @@ class SplineBuilder(object):
             plt.close()
 
         elif (
-            event.button == 3 and zoom_cond and
+            event.button == 3 and
             len(self.xs) > 0 and len(self.ys) > 0
         ):
             """
@@ -172,7 +213,7 @@ class SplineBuilder(object):
                 self.xs = np.delete(self.xs, -1)
                 self.ys = np.delete(self.ys, -1)
 
-        elif event.button == 1 and zoom_cond:
+        elif event.button == 1:
             """
             Clic gauche, ajoute un point.
             Avec ce mode d'ajout, le code va retrier les points dans
@@ -182,34 +223,138 @@ class SplineBuilder(object):
             self.xs = np.append(self.xs, int(event.xdata))
             self.ys = np.append(self.ys, int(event.ydata))
 
-            """
-            Find the local maximum gradient
-
-            ..todo
-
-            """
-            # vals_l = list(self.values[
-            #     int(self.ys)-2:int(self.ys)+2,
-            #     int(self.xs)-2:int(self.xs)+2
-            # ])
-            # line = vals_l.index(max(vals_l))
-            # col = vals_l[line].index(max(vals_l[line]))
-            # self.xs = self.xs + col-2
-            # self.ys = self.ys + line-2
-
         self.ys_interp = self.ys[np.argsort(self.xs)]
         self.xs_interp = np.sort(self.xs)
 
         self.interpolate()
         self.update_fig()
 
+        # new quicker method
+        if len(self.xs_interp) > 1:
+            x_new = self.xs[-1]  # get last x created
+            x_sort = np.sort(self.xs)  # sort xs
+            if x_new == min(self.xs_interp):
+                x_min = x_sort[0]
+                x_max = x_sort[1]
+            elif x_new == max(self.xs_interp):
+                x_min = x_sort[-2]
+                x_max = x_sort[-1]
+            else:
+                x_min = x_sort[(x_sort == x_new)-1]
+                x_max = x_sort[(x_sort == x_new)+1]
+
+            x_sort = self.xs_interp[x_min:x_max]
+            for n in range(7):
+                if self.r_intensity[n] in x_sort:
+                    z = self.z_intensity[x_sort == self.r_intensity]
+                    intens = self.intensity[z, n]
+                    self.axes2[n].plot(
+                        intens,
+                        z, 'or', ms=6
+                    )
+                    self.axes2[n].figure.canvas.draw()
+
+    def on_press_intensity(self, event):
+        for a in self.axes2:
+            if a.get_navigate_mode() == 'ZOOM':  # not zoom mode
+                return
+
+        if event.inaxes not in self.axes2:  # not in the ax
+            return
+
+        if event.button == 1:  # left clic
+            x_curs = int(event.xdata)
+            y_curs = int(event.ydata)
+
+            # get axe number
+            n = 0
+            while event.inaxes != self.axes2[n]:
+                n += 1
+
+            # look for the closet point from clic
+            d = np.inf  # init distance pt from line
+            z_out = 0
+            for z in self.z_intensity[y_curs-15:y_curs+15]:
+                dx = x_curs - self.intensity[z, n]
+                dy = y_curs - z
+                if np.sqrt(dx**2 + dy**2) < d:
+                    d = np.sqrt(dx**2 + dy**2)
+                    z_out = z
+
+            # find the local maximum [+- 4px]
+            it_max = 0  # init intensity maximum
+            z_max = 0  # init z of maximum intensity
+            for z in self.z_intensity[z_out-4:z_out+4]:
+                if self.intensity[z, n] > it_max:
+                    it_max = self.intensity[z, n]
+                    z_max = z
+
+            self.dots[n].set_xdata(self.intensity[z_max, n])
+            self.dots[n].set_ydata(z_max)
+            self.axes2[n].figure.canvas.draw()
+
+            # update fig
+            self.xs = np.append(self.xs, int(self.r_intensity[n]))
+            self.ys = np.append(self.ys, int(z_out))
+            self.ys_interp = self.ys[np.argsort(self.xs)]
+            self.xs_interp = np.sort(self.xs)
+
+            self.interpolate()
+            self.update_fig()
+
+    def on_motion(self, event):
+        if self.press is False:
+            return
+        if event.inaxes not in self.axes:
+            return
+
+        x1, x2 = int(event.xdata), int(event.xdata)
+        y1, y2 = int(event.ydata), int(event.ydata)
+        le = 20  # len of the zoom
+
+        x1 = (x1-le)*(x1 > le)   # = x1-le si x1 > le 0 sinon 0
+        y1 = (y1-le)*(y1 > le)
+
+        x2 = (x2+le)*(x2 < np.shape(self.image)[1] - le+1) + np.shape(self.image)[1] * (1 - (x2 < np.shape(self.image)[1] - le+1))
+        y2 = (y2+le)*(y2 < np.shape(self.image)[0] - le+1) + np.shape(self.image)[0] * (1 - (y2 < np.shape(self.image)[0] - le+1))
+
+        zoom = (
+            self.image * (self.sel_ax_zoom == 0) +
+            self.grad * (self.sel_ax_zoom == 1) +
+            self.grady * (self.sel_ax_zoom == 3)
+        )  # select which image to use (change pressing 'o, 'g or 'y')
+
+        zoom = zoom[y1:y2, x1:x2]  # crop the image
+
+        xc = int(np.shape(zoom)[1]/2)  #  x_center_zoom
+        yc = int(np.shape(zoom)[0]/2)  #  y_center_zoom
+
+        self.cross_x.set_xdata([xc, xc])
+        self.cross_y.set_ydata([yc, yc])
+
+        self.axes[2].imshow(zoom)
+        self.axes[2].figure.canvas.draw()
+
     def on_press_key(self, event):
-        """Keyboards event."""
-        # print(event.key)
-        if event.key in ['q', 'Q', 'escape', 'v', 'V', 'n', 'N', 'enter']:
+        """Keyboards event.
+
+        hit key list
+        ------------
+            v : -validate, close figs, and pass to next image,
+            x : erase point mode. Hit x, if a point is in the vicinity it will be erase.
+                Not reversable.
+            d : enable/disable deplacement mode.
+            'o' : original image for zoom axe
+            'g' : gradient image for zoom axe
+            'y' : gradient_y image for zoom axe
+        """
+        print(event.key)
+        if event.key in ['v']:
             # pass to next image
-            plt.close()
-        elif event.key in ['x', 'X']:
+            plt.close('all')
+
+        elif event.key in ['x']:
+            # erase closest point
             idx = 0
             while idx < len(self.xs):
                 if (
@@ -226,7 +371,7 @@ class SplineBuilder(object):
             self.interpolate()
             self.update_fig()
 
-        elif event.key in ['c', 'C', 'd', 'D', 's', 'S']:
+        elif event.key in ['d']:
             if self.dep_mode:  # si un point déjà selectionné
                 if self.selected[0]:
                     self.dp1.set_data([[], []])
@@ -247,6 +392,15 @@ class SplineBuilder(object):
                 )
                 self.dep_mode = not self.dep_mode
                 print('Deplace mode enabled' + '(Add mode disable)')
+
+        elif event.key in ['o', 'g', 'y']:
+            if event.key == 'o':
+                self.sel_ax_zoom = 0
+            elif event.key == 'g':
+                self.sel_ax_zoom = 1
+            elif event.key == 'y':
+                self.sel_ax_zoom = 3
+            self.axes[2].figure.canvas.draw()
 
     def deplace_release(self, event):
         """

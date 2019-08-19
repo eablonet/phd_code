@@ -13,11 +13,13 @@ import pandas as pd
 from packages.main import Stack as st
 from packages.main import Stefan as ste
 from packages.main import Material as ma
+from packages.main import read_online_data as rd
+
 """
 Physical Parameters
 """
-date = '15-10-2018'
-serie = 3
+date = '20-11-2017'
+serie = 2
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
@@ -35,7 +37,7 @@ k_l = water.get_k()
 cp_l = water.get_cp()
 
 # solver
-manip_data = pd.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
+manip_data = rd.get_data()
 # manip_data.info()
 s = st.Stack()
 
@@ -63,8 +65,9 @@ for _, row in manip_data.iterrows():
         dt_ini = t_nuc - t_ref
 
         # read front information
-        s.read_by_path(row['date'], int(row['serie']))
-        s.read_image(2)  # to load an image else none might be load...to correct
+        s.read_by_date(row['date'], int(row['serie']))
+        s.load_images()
+
         # al, zf = s.read_manual_front()
         zf = s.read_data()
         # s.view_all_profil(zf, 15)

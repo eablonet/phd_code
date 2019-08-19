@@ -7,16 +7,19 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 # from scipy.special import erf
 # import scipy.optimize as op
-import pandas as pd
-import Stack as st
-import Stefan as ste
-import Material as ma
+
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
+from packages.main import read_online_data as rd
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
 z_lookfor = 1
+fs = [8, 8]  # generic figsize
+x_max = 1.5
 
 # ice
 ice = ma.Ice()
@@ -32,25 +35,24 @@ k_l = water.get_k()
 cp_l = water.get_cp()
 
 # solver
-manip_data = pd.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
+manip_data = rd.get_data()
 manip_data.info()
 s = st.Stack()
 
-
 # horizontal
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax0 = fig.add_subplot(1, 1, 1)
 
 # inclined
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax1 = fig.add_subplot(1, 1, 1)
 
 # none symmetrical
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax2 = fig.add_subplot(1, 1, 1)
 
 # all
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax3 = fig.add_subplot(1, 1, 1)
 
 colors = {
@@ -61,7 +63,6 @@ colors = {
 symbols = {0: 'o', 10: '^', 20: 'v', 30: 's', 45: 'd'}  # if inclined 10:b, 20:r, 30:m, 45:g
 nivel = {'horizontal': 1, 'inclined': 2, 'random': 3}
 c = {'horizontal': 0, 'inclined': 0, 'random': 0}
-
 
 for _, row in manip_data.iterrows():
     cond = (
@@ -95,14 +96,9 @@ for _, row in manip_data.iterrows():
 
         c[type] += 1
 
-        # read front information
+        s.read_by_date(row['date'], int(row['serie']))
 
-        s.read_by_path(row['date'], int(row['serie']))
-
-        s.read_image(2)  # to load an image else none might be load...to correct
-        # al, zf = s.read_manual_front()
         zf = s.read_data()
-        # s.view_all_profil(zf, 15)
         t_space, zf, zf_mean, zf_std = s.get_dynamic_front(zf)
         zf = np.max(zf_mean) / px_mm
 
@@ -328,16 +324,16 @@ ax2.grid(True)
 ax3.grid(True)
 
 # x/y limits
-ax0.set_xlim([-.1, 1.7])
+ax0.set_xlim([-.1, x_max])
 ax0.set_ylim([-.1, 1.5])
 
-ax1.set_xlim([-.1, 1.7])
+ax1.set_xlim([-.1, x_max])
 ax1.set_ylim([-.1, 1.5])
 
-ax2.set_xlim([-.1, 1.7])
+ax2.set_xlim([-.1, x_max])
 ax2.set_ylim([-.1, 1.5])
 
-ax3.set_xlim([-.1, 1.7])
+ax3.set_xlim([-.1, x_max])
 ax3.set_ylim([-.1, 1.5])
 
 

@@ -7,7 +7,6 @@ date : 2019
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-import pandas as pd
 
 from packages.main import Stack as st
 from packages.main import Stefan as ste
@@ -20,7 +19,7 @@ rcParams.update({'figure.autolayout': True})  # enable tight layout
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
 z_lookfor = 1
-x_max = 3
+x_max = 1.5
 
 # ice
 ice = ma.Ice()
@@ -113,12 +112,8 @@ for _, row in manip_data.iterrows():
 
         # read front information
 
-        s.read_by_path(row['date'], int(row['serie']))
-
-        s.read_image(2)  # to load an image else none might be load...to correct
-        # al, zf = s.read_manual_front()
+        s.read_by_date(row['date'], int(row['serie']))
         zf = s.read_data()
-        # s.view_all_profil(zf, 15)
         t_space, zf, zf_mean, zf_std = s.get_dynamic_front(zf)
         zf = np.nanmax(zf_mean) / px_mm
 
@@ -347,16 +342,16 @@ ax2.grid(True)
 ax3.grid(True)
 
 # x/y limits
-ax0.set_xlim([-.5, x_max])
+ax0.set_xlim([-.05, x_max])
 ax0.set_ylim([-.1, 1.5])
 
-ax1.set_xlim([-.5, x_max])
+ax1.set_xlim([-.05, x_max])
 ax1.set_ylim([-.1, 1.5])
 
-ax2.set_xlim([-.5, x_max])
+ax2.set_xlim([-.05, x_max])
 ax2.set_ylim([-.1, 1.5])
 
-ax3.set_xlim([-.5, x_max])
+ax3.set_xlim([-.05, x_max])
 ax3.set_ylim([-.1, 1.5])
 
 # show

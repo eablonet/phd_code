@@ -63,6 +63,9 @@ from ..geometrybuilder import LineBuilder as lb
 from ..geometrybuilder import DraggrableRectangle as drag
 from ..geometrybuilder import Geometry as geom
 
+from packages.design import color as ea_color
+from packages.library import main as pers_conv
+
 from ..gui import ClaheWindow as cw
 
 # code
@@ -82,14 +85,32 @@ class Stack(object):
     lot of
     """
 
-    def __init__(self):
-        None
+    def __init__(self, date=None, serie=None):
+        """Init the Class.
+
+        input
+        -----
+        date: str
+            Choose the date of the manip. Default None don't read any folder.
+        serie: int
+            Choose the serie of the manip. Default None don't read any folder.
+
+        Notice
+        ------
+        If date is not None, but serie is None, will read the first serie (1).
+
+        """
+        if date is not None:
+            if serie is None:
+                self.read_by_date(date, 1)
+            else:
+                self.read_by_date(date, serie)
 
     def __str__(self):
         """Print the data directory on the terminal."""
         return self.data_directory
 
-    def read_by_path(self, date, serie, regex='cam1_*', ext='.tif'):
+    def read_by_date(self, date, serie):
         """Choose the path.
 
         If the experiement is not in the db, an error occur.
@@ -119,15 +140,9 @@ class Stack(object):
             raise IndexError(
                 'This experiment is not in the database, please add it before'
             )
-        else:
-            print('Path readed...')
+
 
         self.create_directory()
-        self.update_lists(regex, ext)
-
-        self.current_image_number = 1
-        self.read_image()
-        print('Current image selected : 1.')
 
     def select_folder(self):
         """
@@ -151,8 +166,8 @@ class Stack(object):
         if not os.path.isdir(self.exporting_directory):
             os.makedirs(self.exporting_directory + 'lastOp/')
 
-    def update_lists(self, regex='cam1_*', ext='.tif'):
-        """Update the lists of image, spatiox and Spatio_y."""
+    def load_images(self, regex='cam1_*', ext='.tif'):
+        """Update the lists of image."""
         # check what exists in data_folder #
         if os.path.isdir(self.data_directory + '_export'):
             # new procedure of reading # to work on pretreated images
@@ -186,6 +201,10 @@ class Stack(object):
 
         self.n_image_tot = len(self.image_list)
         self.range_images = range(1, self.n_image_tot+1)
+
+        self.current_image_number = 1
+        self.read_image()
+        print('Current image selected : 1.')
 
     def print_info(self, type=None):
         """
@@ -404,17 +423,41 @@ class Stack(object):
             print('\trc : ', rc)
             print('Please add this value in the table')
 
-    def tracker(self, folder_name='front', pts=[]):
+    def tracker(self, folder_name='front', pts=[], cmp='pink'):
         """Get the front manually."""
-        temp = self.current_image_number
+        temp = self.current_image_number  # store current image loaded
 
+        # load data from database
+        # -----------------------
+        r0 = self.datas['r0'].values
+        rc = self.datas['rc'].values
+
+        r_intensity = []  # init r_vector, \
+        # for the 7 position where we gonna look at the intensity
+        for i in range(7):
+            r_intensity = np.append(r_intensity, int(i*1.8*r0/6+rc-.9*r0))
+            # position from [-.9(rc-r0) ; .9(rc + r0)]
+
+        # init vectors
+        # ------------
         interpolation = np.zeros(
             (self.n_image_tot, self.current_image.size[1])
         )
+        '''
+        interpoation vector front position z_i(time, r)
+            ndlr front position for time and r
+        '''
         points = np.zeros(
             (self.n_image_tot, self.current_image.size[1])
         )
+        '''
+        interpoation points front position z_i(time, r)
+            ndlr front position for time and r
+        '''
         r_space = range(0,  self.current_image.size[1])
+        # vector of r
+        z_space = np.arange(0, self.current_image.size[0])
+        # vector of z
 
         time_ref = int(self.datas.iloc[0]['t_ref_calc'])
         # time to start detection
@@ -428,53 +471,144 @@ class Stack(object):
             self.read_image(n)
             im = self.current_image.rotate(-ref_pente)
 
-            # time gradient image ax3
-            if n < self.n_image_tot+1 and n > 0:
+            im_grad = self.current_image.gradient(
+                5, 'sobel', 'mag', 'same', im=im
+            )
+            im_grady = self.current_image.gradient(
+                5, 'sobel', 'y', 'same', im=im
+            )
 
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = (2*im - im_b - im_a)/2
+            """First figure : fig
 
-            elif n == 0:
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im_a - im
+            axes
+            ----
+                #nb : 4
+                ax1 : original image
+                ax2 : gradient image
+                ax3 : local zoom image
+                ax4 : grad_y image
 
-            elif n == self.n_image_tot:
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im - im_b
-
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'valid')
-            im_grady = self.current_image.gradient(5, 'sobel', 'y', 'valid')
-            im_grad = self.current_image.rotate(-ref_pente, im_grad)
-
-            fig = plt.figure(figsize=(20, 10))
-            fig.canvas.set_window_title('Image {}/{}'.format(
-                    n, self.n_image_tot+1
+            """
+            fig = plt.figure(figsize=(16, 9))
+            fig.canvas.set_window_title('Image {}/{} ({}%)'.format(
+                    n, self.n_image_tot,
+                    int((n-time_ref)/(time_end-time_ref)*100)
                 )
             )
+            fig.tight_layout(pad=.01, h_pad=.01, w_pad=.01)
             ax1 = plt.subplot(2, 2, 1)
-            ax1.imshow(im, cmap='gray')
+            ax1.imshow(im, cmap=cmp, interpolation='none')
             ax1.axis('off')
             ax1.set_title('Original image')
 
             ax2 = plt.subplot(2, 2, 2)
-            ax2.imshow(im_grad, cmap='gray')
+            ax2.imshow(im_grad, cmap=cmp, interpolation='none')
             ax2.axis('off')
             ax2.set_title('Gradient magnitude')
 
             ax3 = plt.subplot(2, 2, 3)
-            ax3.imshow(im_time, cmap='gray')
             ax3.axis('off')
-            ax3.set_title('Time gradient')
+            ax3.set_title('Zoom')
 
             ax4 = plt.subplot(2, 2, 4)
-            ax4.imshow(im_grady, cmap='gray')
+            ax4.imshow(im_grady, cmap=cmp, interpolation='none')
             ax4.axis('off')
             ax4.set_title('y-Gradient')
+
+            """Second figure : fig1
+
+            axes
+            ----
+                #nb : 7
+                axes : list
+                    Contains all the 7 axes. Each axe represent the z_position
+                    versus the intensity for one r position
+
+            """
+            fig1 = plt.figure(figsize=(16, 9))
+            fig1.canvas.set_window_title('Image {}/{} ({}%)'.format(
+                    n, self.n_image_tot,
+                    int((n-time_ref)/(time_end-time_ref)*100)
+                )
+            )
+            axes = []
+            for i in range(7):
+                axes.append(
+                    plt.subplot(
+                        1, 7, i+1,
+                        sharey=axes[0] if i > 0 else None
+                    )
+                )
+                axes[i].invert_yaxis()  # for (0,0) been up left
+                plt.xlabel('Intensity')
+
+            color = ea_color.color_met(7)  # generate 7 (beautifuls) colors
+            intensity = np.zeros([self.current_image.size[0], 7])
+
+            for i in range(7):
+                intensity[:, i] = pers_conv.sliding_mean(
+                    im[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
+                )
+                grad_intens = pers_conv.gradient(
+                    im[:, int(i*1.8*r0/6+rc-.9*r0)]
+                )
+                intensity[:, i] = pers_conv.sliding_mean(
+                    im[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
+                )
+                axes[i].plot(
+                    intensity[:, i],
+                    z_space,
+                    c=color[i],
+                )
+                axes[i].plot(
+                    grad_intens,
+                    z_space[::4],
+                    ls='--',
+                    c=color[i],
+                )
+
+                ax1.plot(
+                    [int(i*1.8*r0/6+rc-.9*r0), int(i*1.8*r0/6+rc-.9*r0)],
+                    [0, self.current_image.size[0]],
+                    c=color[i], alpha=.2, lw=2,
+                )
+
+            """Third figure : fig2
+
+            axes
+            ----
+                #nb : 4
+                ax20 : sum of column intensity (normalized)
+                ax21 : sum of column gradient intensity (normalized)
+                ax22 : sum of column gradient_y intensity (normalized)
+                ax23 : product of three previous intensity (normalized)
+
+            """
+            fig2 = plt.figure(figsize=[16, 9])
+            ax20 = plt.subplot(1,4,1)
+            ax21 = plt.subplot(1,4,2)
+            ax22 = plt.subplot(1,4,3)
+            ax23 = plt.subplot(1,4,4)
+
+            it0 = np.zeros(np.shape(im)[0])
+            it1 = np.zeros(np.shape(im)[0])
+            it2 = np.zeros(np.shape(im)[0])
+            for i in range(np.shape(im)[1]):
+                it0 += im[:, i]
+                it1 += im_grad[:, i]
+                it2 += im_grady[:, i]
+            it0 = (it0 - np.min(it0))/(np.max(it0) - np.min(it0))
+            it1 = (it1 - np.min(it1))/(np.max(it1) - np.min(it1))
+            it2 = (it2 - np.min(it2))/(np.max(it2) - np.min(it2))
+
+            it0 = pers_conv.sliding_mean(it0, size=3)
+            it1 = pers_conv.sliding_mean(it1, size=3)
+            it2 = pers_conv.sliding_mean(it2, size=3)
+
+            ax20.plot(range(np.shape(im)[0]-4), it0[2:-2], '-', c='tab:blue')
+            ax21.plot(range(np.shape(im)[0]-4), it1[2:-2], '-', c='tab:orange')
+            ax22.plot(range(np.shape(im)[0]-4), it2[2:-2], '-', c='tab:green')
+            ax23.plot(range(np.shape(im)[0]-4), it0[2:-2]*it1[2:-2]*it2[2:-2], '-', c='tab:blue')
 
             if n > time_ref:
                 # plot previous line
@@ -483,10 +617,6 @@ class Stack(object):
                     '-r', alpha=.3
                 )
                 ax2.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax3.plot(
                     r_space, interpolation[n-1, :],
                     '-r', alpha=.3
                 )
@@ -504,35 +634,15 @@ class Stack(object):
                     r_space, points[n-1, :],
                     'or', alpha=.3, ms=4,
                 )
-                ax3.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
                 ax4.plot(
                     r_space, points[n-1, :],
                     'or', alpha=.3, ms=4,
                 )
 
-                ylim_low = np.min(linebuilder.ys[linebuilder.ys != 0]) - 40 # noqa: ignore=F821
-                ylim_low = ylim_low if ylim_low > 0 else 0  # noqa: ignore=F821
-                ylim_upp = np.max(linebuilder.ys[linebuilder.ys != 0]) + 10 # noqa: ignore=F821
-                ylim_upp = ylim_upp if ylim_upp < im_grad.shape[0] else im_grad.shape[0]  # noqa: ignore=F821
-
-                xlim_left = np.min(linebuilder.xs[linebuilder.xs != 0]) - 40 # noqa: ignore=F821
-                xlim_left = xlim_left if xlim_left > 0 else 0  # noqa: ignore=F821
-                xlim_right = np.max(linebuilder.xs[linebuilder.xs != 0]) + 40 # noqa: ignore=F821
-                xlim_right = xlim_right if xlim_right < im_grad.shape[1] else im_grad.shape[1]  # noqa: ignore=F821
-
-                ax2.set_xlim([xlim_left, xlim_right])
-                ax2.set_ylim([ylim_upp, ylim_low])
-
-                ax3.set_xlim([xlim_left, xlim_right])
-                ax3.set_ylim([ylim_upp, ylim_low])
-
-                ax4.set_xlim([xlim_left, xlim_right])
-                ax4.set_ylim([ylim_upp, ylim_low])
-
-            linebuilder = lb.SplineBuilder(ax1, ax2, ax3, ax4)
+            linebuilder = lb.SplineBuilder(
+                ax1, ax2, ax3, ax4, im, im_grad, im_grady,
+                axes, intensity, z_space, r_intensity
+            )
             plt.tight_layout()
             plt.show()
 
@@ -1618,7 +1728,7 @@ class Stack(object):
         time_ref = int(self.datas['t_ref_calc'].values)
         px_mm = float(self.datas.iloc[0]['px_mm'])
         fps = float(self.datas.iloc[0]['fps'])
-        x_space = np.arange(self.current_image.size[1])
+        x_space = np.arange(len(zf[0, :]))
         t_space = np.arange(len(zf[time_ref:, 0]))
 
         zf = zf[time_ref:, :]
@@ -2455,6 +2565,26 @@ class Stack(object):
         x += w_c
         y += h_c
         return x, y
+
+    def get_rfront_loc(self, loc='center'):
+        zf = self.read_data()
+        t_space, zf, zf_mean, zf_std = self.get_dynamic_front(zf)
+
+        time = np.arange(0, len(zf_mean))
+        r = []
+
+        if loc == 'center':
+            r0 = self.get_data(int(self.datas['r0'].values))
+            for t in time:
+                r.append(zf[t, r0])
+        elif loc == 'min':
+            for t in time:
+                r.append(zf[t, 0])
+        elif loc == 'max':
+            for t in time:
+                r.append(zf[t, -1])
+
+        return r
 
 
 class GetFolderName(QWidget):

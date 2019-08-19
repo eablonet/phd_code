@@ -12,15 +12,18 @@ import pandas as pd
 
 # local packages
 # --------------
-from ..packages.main import Stack as st
-from ..packages.main import Stefan as ste
-from ..packages.main import Material as ma
+from packages.main import Stack as st
+from packages.main import Stefan as ste
+from packages.main import Material as ma
+from packages.main import read_online_data as rd
 
 rcParams.update({'figure.autolayout': True})  # enable tight layout
 
 folder = '/Users/eablonet/Documents/0_phd/4_reports/reu_26_03_2019/images/'
 
 z_lookfor = 1
+fs = [8, 8]
+x_max = 1.5
 
 # ice
 ice = ma.Ice()
@@ -36,25 +39,24 @@ k_l = water.get_k()
 cp_l = water.get_cp()
 
 # solver
-manip_data = pd.read_csv('manips.csv', skiprows=[0, 2], decimal=",")
-manip_data.info()
+manip_data = rd.get_data()
 s = st.Stack()
 
 
 # horizontal
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax0 = fig.add_subplot(1, 1, 1)
 
 # inclined
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax1 = fig.add_subplot(1, 1, 1)
 
 # none symmetrical
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax2 = fig.add_subplot(1, 1, 1)
 
 # all
-fig = plt.figure(figsize=[8, 4.5])
+fig = plt.figure(figsize=fs)
 ax3 = fig.add_subplot(1, 1, 1)
 
 colors = {
@@ -101,12 +103,9 @@ for _, row in manip_data.iterrows():
 
         # read front information
 
-        s.read_by_path(row['date'], int(row['serie']))
+        s.read_by_date(row['date'], int(row['serie']))
 
-        s.read_image(2)  # to load an image else none might be load...to correct
-        # al, zf = s.read_manual_front()
         zf = s.read_data()
-        # s.view_all_profil(zf, 15)
         t_space, zf, zf_mean, zf_std = s.get_dynamic_front(zf)
         zf = np.max(zf_mean) / px_mm
 

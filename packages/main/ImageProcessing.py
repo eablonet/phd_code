@@ -48,7 +48,7 @@ class ImageProcessing():
         """
         self.image_path = impath
         if impath[-4:] == '.tif':
-            self.image = imread(impath, as_grey=True)
+            self.image = imread(impath, as_gray=True)
         elif impath[-4:] == '.npy':
             self.image = np.load(impath)
 

@@ -10,12 +10,16 @@ class
 
 """
 
-from numpy import sqrt, linspace, zeros, pi, exp, cos, arccos
+from numpy import sqrt, linspace, zeros, pi, exp, arccos, arange
+from numpy import cos
 from matplotlib import pyplot as plt
 from scipy.special import erf, erfc
 from scipy import optimize as op
 
-from . import Material as ma
+try:
+    from packages.main import Material as ma
+except ModuleNotFoundError:
+    import Material as ma
 
 
 class Stefan(object):
@@ -44,8 +48,6 @@ class Stefan(object):
 
     def __init__(self):
         """Allocate variables."""
-        print(self)
-
         self.rho = None
         self.k = None
         self.cp = None
@@ -70,12 +72,11 @@ class Stefan(object):
     def import_material(self, material):
         """Import the material properties."""
         if material is 'ice':
-            mat = ma.Ice()
+            mat = ma.Water('solid')
         elif material is 'water':
-            mat = ma.Water()
+            mat = ma.Water('liquid')
 
         self.rho = mat.get_rho()
-        print(self.rho)
         self.k = mat.get_k()
         self.cp = mat.get_cp()
         self.alpha = mat.get_alpha()
@@ -437,43 +438,151 @@ class PseudoTwoDim(object):
         self.time = t
         return z/self.z0 if adim else z
 
+class PseudoTwoDim_trans(object):
+    def __init__(self):
+        super().__init__()
+        self.Lf = 333500
+        mat = ma.Ice()
+        self.rho = mat.get_rho()
+        self.k = mat.get_k()
+        self.cp = mat.get_cp()
+        self.alpha = mat.get_alpha()
+
+        mat = ma.Water()
+        self.rho_l = mat.get_rho()
+
+    def set_geom(self, z0, r0, Nz):
+        """Import geometry, boundaries condition and initiale condition.
+
+        Parameters
+        ----------
+        z0 : float
+            initiale height of the drop (in mm)
+        Nz : int
+            Number of node for z discretization
+        r0 : float
+            Foot radius of the drop (in mm)
+
+        """
+        self.z0 = z0
+        self.z = linspace(0, z0, Nz)
+        self.r0 = r0
+        self.rd = (z0**2 + r0**2)/(2*z0)
+        print('rd : ', self.rd)
+
+    def set_therm(self, Tw, Tm):
+        self.Tw = Tw
+        self.Tm = Tm
+        self.Ste = self.cp*(Tm - Tw)/self.Lf
+        print(self.Ste)
+
+    def set_time(self, t_end=30, Nt=1000):
+        """Redefine the stop condition."""
+        self.time = linspace(0, t_end, Nt)
+        self.delta_t = self.time[1] - self.time[0]
+
+    def get_zpos(self, adim=False):
+        """Solve the front position."""
+
+        """
+        Euler solution
+        """
+        z = [0]
+        delta = [sqrt(self.Ste/2)]
+        n = 0
+
+        b = 1 / (self.r0**2)
+        c = 2*b*(self.z0 - self.rd)
+        zf = self.rho_l/self.rho * self.z0
+
+        while z[n] < zf:
+            z1 = sqrt(
+                z[n]**2 +
+                4*self.delta_t * self.k * (self.Tm - self.Tw) / (self.rho*self.Lf) *  # diffusion therm
+                exp(-delta[n]**2) / erf(delta[n]) * delta[n] /  # transitoire correction
+                (1 - b*z[n]**2 + c*z[n])  # geometric correction
+            )
+
+            delta1 = z1/(2*sqrt(self.alpha*(n+1)*self.delta_t))
+
+            z.append(z1)
+            delta.append(delta1)
+            n += 1
+
+        # def get_delta(zn):
+        #     b = 1 / (self.r0**2)
+        #     c = 2*b*(self.z0 - self.rd)
+        #     right_delta = self.Ste/sqrt(pi)*(
+        #         1-b*zn*2+c*zn
+        #     )**(-1)
+        #
+        #     def func(delta):
+        #         return delta*exp(delta**2)*erf(delta) - right_delta
+        #
+        #     return op.fsolve(func, .1)
+        #
+        # while n < len(self.time)-1:
+        #     n += 1
+        #     print('delta : ', get_delta(z[n-1])[0])
+        #     delta.append(get_delta(z[n-1]))
+        #     z.append(2*delta[0]*sqrt(self.alpha*self.time[n]))
+
+        return z/self.z0 if adim else z
+
+
 if __name__ == '__main__':
     st = Stefan()
     st.import_material('ice')
-    st.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=20)
+    st.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=10)
     st.define_stop_condition('tf', Nt=1000)
 
-    st_m = StefanMassique(.15)
-    st_m.import_material('ice')
-    st_m.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=20)
-    print('Nucleation temp correction', st_m.T_down)
-    st_m.define_stop_condition('tf', Nt=1000)
+    # st_m = StefanMassique(.15)
+    # st_m.import_material('ice')
+    # st_m.import_geometry(z0=2e-3, Nz=100, T_down=-10, T_up=0, T_ini=10)
+    # print('Nucleation temp correction', st_m.T_down)
+    # st_m.define_stop_condition('tf', Nt=1000)
+    #
+    # st_m2 = StefanMassique(.05)
+    # st_m2.import_material('ice')
+    # st_m2.import_geometry(z0=2e-3, Nz=100, T_down=-10, T_up=0, T_ini=10)
+    # print('Nucleation temp correction', st_m2.T_down)
+    # st_m2.define_stop_condition('tf', Nt=1000)
 
-    st_m2 = StefanMassique(.05)
-    st_m2.import_material('ice')
-    st_m2.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=20)
-    print('Nucleation temp correction', st_m2.T_down)
-    st_m2.define_stop_condition('tf', Nt=1000)
-
-    dip = Diphasique()
-    dip.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=20, T_ini=20, T_m=0)
-    dip.import_material('ice', 'water')
-    dip.define_stop_condition('tf')
+    # dip = Diphasique()
+    # dip.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=10, T_ini=10, T_m=0)
+    # dip.import_material('ice', 'water')
+    # dip.define_stop_condition('tf')
 
     ptd = PseudoTwoDim()
-    ptd.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=20, r0=4e-3)
+    ptd.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=10, r0=2e-3/.64)
     ptd.import_material('ice')
     ptd.define_stop_condition('tf', dt=.01)
     z = ptd.front_position()  # to generate the time
 
+    # ptd_new = PseudoTwoDim_trans()
+    # ptd_new.set_geom(2e-3, 2e-3/.64, 1000)
+    # ptd_new.set_therm(Tw=-15, Tm=0)
+    # ptd_new.set_time(t_end=30, Nt=1000)
+    # ptd_new.set_time(t_end=30, Nt=1000)
+    # z_new = ptd_new.get_zpos()
+
     plt.figure(figsize=[8, 4.5])
     zs_comp = sqrt(2*2.2*(0+15)/(916.2*333500)*st.time)
-    plt.plot(st.time, zs_comp, '--m', label='Ref')
+    # plt.plot(st.time, zs_comp, '--m', label='Ref')
     plt.plot(st.time, st.front_position(), '--k', label='Quasi-statique')
-    plt.plot(dip.time, dip.front_position(), '--r', label='Full Stefan')
-    plt.plot(ptd.time, z, '--y', label='Pseudo-2D')
-    plt.plot(st_m.time, st_m.front_position(), '--g', label='Stefan massique fraction .15')
-    plt.plot(st_m2.time, st_m2.front_position(), '--c', label='Stefan massique fraction .3')
+    # plt.plot(dip.time, dip.front_position(), '--r', label='Full Stefan')
+    plt.plot(ptd.time, z, '--', c='tab:orange', label='Geom a = .64')
+    # plt.plot(arange(len(z_new))*ptd_new.delta_t, z_new, '--', c='tab:orange', label='Pseudo-2D_trans')
+    # plt.plot(st_m.time, st_m.front_position(), '--g', label='Stefan massique fraction .15')
+    # plt.plot(st_m2.time, st_m2.front_position(), '--c', label='Stefan massique fraction .3')
+
+    ptd = PseudoTwoDim()
+    ptd.import_geometry(z0=2e-3, Nz=100, T_down=-15, T_up=0, T_ini=10, r0=2.01e-3)
+    ptd.import_material('ice')
+    ptd.define_stop_condition('tf', dt=.01)
+    z = ptd.front_position()  # to generate the time
+    plt.plot(ptd.time, z, '--', c='tab:blue', label='Geom hemi-sphérique')
+
     plt.legend(fancybox=True)
     plt.grid(True)
     plt.xlabel('t (s)')
@@ -481,14 +590,14 @@ if __name__ == '__main__':
 
     plt.figure()
     plt.plot(st.z, st.temp_field(True)[:, 30])
-    plt.plot(dip.z, dip.temp_field(True)[:, 30])
-    plt.plot(
-        [dip.front_position(adim=True)[30], dip.front_position(adim=True)[30]],
-        [0, 1],
-        '--b'
-    )
+    # plt.plot(dip.z, dip.temp_field(True)[:, 30])
+    # plt.plot(
+    #     [dip.front_position(adim=True)[30], dip.front_position(adim=True)[30]],
+    #     [0, 1],
+    #     '--b'
+    # )
 
     plt.figure()
     plt.plot(st.time, st.temp_field(True)[30, :])
-    plt.plot(dip.time, dip.temp_field(True)[30, :])
+    # plt.plot(dip.time, dip.temp_field(True)[30, :])
     plt.show()

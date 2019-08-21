@@ -52,6 +52,8 @@ from scipy.ndimage import morphology as morph
 from skimage import measure
 from scipy import ndimage
 
+import peakutils as peaks
+
 import pandas as ps
 
 # local packages
@@ -70,6 +72,9 @@ from ..gui import ClaheWindow as cw
 
 # code
 # ----
+# usefull mehtods
+def log(x):
+    print(x, file=sys.stderr)
 
 
 class Stack(object):
@@ -140,7 +145,6 @@ class Stack(object):
             raise IndexError(
                 'This experiment is not in the database, please add it before'
             )
-
 
         self.create_directory()
 
@@ -467,9 +471,29 @@ class Stack(object):
         ref_pente = float(self.datas.iloc[0]['alpha'])
         # substrate inclination
 
+        x, y = [], []  # points locations
+        x_interp, y_interp = [], []  # interpolate line
         for n in range(time_ref, time_end):
+            # generate useful images
+            # ----------------------
             self.read_image(n)
             im = self.current_image.rotate(-ref_pente)
+            image = self.current_image.rotate(-ref_pente)
+            im_grad = self.current_image.gradient(
+                5, 'sobel', 'mag', 'same', im=image
+            )
+            im_grady = self.current_image.gradient(
+                5, 'sobel', 'y', 'same', im=image
+            )
+
+            line = lb.SplineBuilder(image, im_grad, im_grady)
+            line.add_points(x, y)
+            line.add_line(x_interp, y_interp)
+
+            plt.show()
+
+            x, y = line.point.get_point()
+            x_interp, y_interp = line.point.get_interpolation()
 
             im_grad = self.current_image.gradient(
                 5, 'sobel', 'mag', 'same', im=im
@@ -547,18 +571,37 @@ class Stack(object):
 
             for i in range(7):
                 intensity[:, i] = pers_conv.sliding_mean(
-                    im[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
+                    im_grad[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
+                )
+                it = intensity[1:-1, i]
+                thres = (np.mean(it)+np.std(it))/np.max(it)
+                log(thres)
+                indexes = peaks.indexes(
+                    it,
+                    thres=thres,
+                    min_dist=30,
                 )
                 grad_intens = pers_conv.gradient(
-                    im[:, int(i*1.8*r0/6+rc-.9*r0)]
+                    it
                 )
-                intensity[:, i] = pers_conv.sliding_mean(
-                    im[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
+
+                indexes_grad = peaks.indexes(
+                    grad_intens,
+                    thres=.5,
+                    min_dist=25,  # distance for 2 peaks
                 )
+
                 axes[i].plot(
                     intensity[:, i],
                     z_space,
                     c=color[i],
+                )
+                axes[i].plot(
+                    it[indexes],
+                    indexes,
+                    ls='None',
+                    marker='x',
+                    mec='r', mfc='None',
                 )
                 axes[i].plot(
                     grad_intens,
@@ -566,30 +609,47 @@ class Stack(object):
                     ls='--',
                     c=color[i],
                 )
+                axes[i].plot(
+                    grad_intens[indexes_grad],
+                    indexes_grad,
+                    ls='None',
+                    marker='x',
+                    mec='r', mfc='None',
+                )
 
                 ax1.plot(
                     [int(i*1.8*r0/6+rc-.9*r0), int(i*1.8*r0/6+rc-.9*r0)],
                     [0, self.current_image.size[0]],
                     c=color[i], alpha=.2, lw=2,
                 )
+                ax1.plot(
+                    int(i*1.8*r0/6+rc-.9*r0)*np.ones(len(indexes)),
+                    indexes,
+                    ls='None',
+                    marker='x', mfc='None', mec='r',
+                )
 
             """Third figure : fig2
 
             axes
             ----
-                #nb : 4
-                ax20 : sum of column intensity (normalized)
-                ax21 : sum of column gradient intensity (normalized)
-                ax22 : sum of column gradient_y intensity (normalized)
-                ax23 : product of three previous intensity (normalized)
+                #nb : 8
+                ax2[0] : sum of column intensity (normalized)
+                ax2[1] : sum of column gradient intensity (normalized)
+                ax2[2] : sum of column gradient_y intensity (normalized)
+                ax2[3] : product of three previous intensity (normalized)
+                ax2[4] : sum of row intensity (normalized)
+                ax2[5] : sum of row gradient intensity (normalized)
+                ax2[6] : sum of row gradient_y intensity (normalized)
+                ax2[7] : product of three previous intensity (normalized)
 
             """
-            fig2 = plt.figure(figsize=[16, 9])
-            ax20 = plt.subplot(1,4,1)
-            ax21 = plt.subplot(1,4,2)
-            ax22 = plt.subplot(1,4,3)
-            ax23 = plt.subplot(1,4,4)
+            plt.figure(figsize=[16, 9])
+            axs2 = []
+            for i in range(1, 9):
+                axs2.append(plt.subplot(2, 4, i))
 
+            """ Sum of columns"""
             it0 = np.zeros(np.shape(im)[0])
             it1 = np.zeros(np.shape(im)[0])
             it2 = np.zeros(np.shape(im)[0])
@@ -597,18 +657,93 @@ class Stack(object):
                 it0 += im[:, i]
                 it1 += im_grad[:, i]
                 it2 += im_grady[:, i]
+
+            # cut 2 firsts and 2 lasts points
+            it0 = it0[2:-2]
+            it1 = it1[2:-2]
+            it2 = it2[2:-2]
+
+            # normalized
             it0 = (it0 - np.min(it0))/(np.max(it0) - np.min(it0))
             it1 = (it1 - np.min(it1))/(np.max(it1) - np.min(it1))
             it2 = (it2 - np.min(it2))/(np.max(it2) - np.min(it2))
 
-            it0 = pers_conv.sliding_mean(it0, size=3)
-            it1 = pers_conv.sliding_mean(it1, size=3)
-            it2 = pers_conv.sliding_mean(it2, size=3)
+            # sliding average
+            # it0 = pers_conv.sliding_mean(it0, size=3)
+            # it1 = pers_conv.sliding_mean(it1, size=3)
+            # it2 = pers_conv.sliding_mean(it2, size=3)
 
-            ax20.plot(range(np.shape(im)[0]-4), it0[2:-2], '-', c='tab:blue')
-            ax21.plot(range(np.shape(im)[0]-4), it1[2:-2], '-', c='tab:orange')
-            ax22.plot(range(np.shape(im)[0]-4), it2[2:-2], '-', c='tab:green')
-            ax23.plot(range(np.shape(im)[0]-4), it0[2:-2]*it1[2:-2]*it2[2:-2], '-', c='tab:blue')
+            ind0 = peaks.indexes(
+                it0,
+                thres=thres,
+                min_dist=30,
+            )
+            ind1 = peaks.indexes(
+                it1,
+                thres=thres,
+                min_dist=30,
+            )
+            ind2 = peaks.indexes(
+                it2,
+                thres=thres,
+                min_dist=30,
+            )
+
+            axs2[0].plot(range(np.shape(im)[0]-4), it0, '-', c='tab:blue')
+            axs2[0].plot(ind0, it0[ind0], ls='None', marker='x', c='r')
+            axs2[1].plot(range(np.shape(im)[0]-4), it1, '-', c='tab:orange')
+            axs2[1].plot(ind1, it1[ind1], ls='None', marker='x', c='r')
+            axs2[2].plot(range(np.shape(im)[0]-4), it2, '-', c='tab:green')
+            axs2[2].plot(ind2, it2[ind2], ls='None', marker='x', c='r')
+            axs2[3].plot(range(np.shape(im)[0]-4), it0*it1, '-', c='tab:blue')
+
+            """ Sum of rows"""
+            it0 = np.zeros(np.shape(im)[1])
+            it1 = np.zeros(np.shape(im)[1])
+            it2 = np.zeros(np.shape(im)[1])
+            for i in range(np.shape(im)[0]):
+                it0 += im[i, :]
+                it1 += im_grad[i, :]
+                it2 += im_grady[i, :]
+
+            # cut 2 firsts and 2 lasts points
+            it0 = it0[2:-2]
+            it1 = it1[2:-2]
+            it2 = it2[2:-2]
+
+            # normalized
+            it0 = (it0 - np.min(it0))/(np.max(it0) - np.min(it0))
+            it1 = (it1 - np.min(it1))/(np.max(it1) - np.min(it1))
+            it2 = (it2 - np.min(it2))/(np.max(it2) - np.min(it2))
+
+            # sliding average
+            # it0 = pers_conv.sliding_mean(it0, size=3)
+            # it1 = pers_conv.sliding_mean(it1, size=3)
+            # it2 = pers_conv.sliding_mean(it2, size=3)
+
+            ind0 = peaks.indexes(
+                it0,
+                thres=thres,
+                min_dist=30,
+            )
+            ind1 = peaks.indexes(
+                it1,
+                thres=thres,
+                min_dist=30,
+            )
+            ind2 = peaks.indexes(
+                it2,
+                thres=thres,
+                min_dist=30,
+            )
+
+            axs2[4].plot(range(np.shape(im)[1]-4), it0, '-', c='tab:blue')
+            axs2[4].plot(ind0, it0[ind0], ls='None', marker='x', c='r')
+            axs2[5].plot(range(np.shape(im)[1]-4), it1, '-', c='tab:orange')
+            axs2[5].plot(ind1, it1[ind1], ls='None', marker='x', c='r')
+            axs2[6].plot(range(np.shape(im)[1]-4), it2, '-', c='tab:green')
+            axs2[6].plot(ind2, it2[ind2], ls='None', marker='x', c='r')
+            axs2[7].plot(range(np.shape(im)[1]-4), it0*it1, '-', c='tab:blue')
 
             if n > time_ref:
                 # plot previous line
@@ -639,15 +774,18 @@ class Stack(object):
                     'or', alpha=.3, ms=4,
                 )
 
-            linebuilder = lb.SplineBuilder(
+            linebuilder = lb.SplineBuilderOld(
                 ax1, ax2, ax3, ax4, im, im_grad, im_grady,
                 axes, intensity, z_space, r_intensity
             )
             plt.tight_layout()
-            plt.show()
+            # plt.show()
 
             points[n, linebuilder.xs] = linebuilder.ys
             interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
+
+            if n % 10 == 0:
+                None
 
         if not os.path.isdir(self.data_directory + folder_name):
             os.makedirs(self.data_directory + folder_name)

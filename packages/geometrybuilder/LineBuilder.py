@@ -147,6 +147,8 @@ class Image:
 
         self.zoom = case[im][y1:y2, x1:x2]  # crop the image
 
+        return x1, y1, x2, y2
+
     def get_image(self):
         """Return image."""
         return self.im
@@ -193,11 +195,10 @@ class SplineBuilder(object):
         # init states button
         # ------------------
         self.press_key = None
+        self.zoom_center = []
 
 
         """Old stuff."""
-        self.sel_ax_zoom = 0
-
         # self.intensity = intensity
         # self.z_intensity = z_intensity
         # self.r_intensity = r_intensity
@@ -343,6 +344,10 @@ class SplineBuilder(object):
         # -----------------
         if self.press_key is None:  # if we don't press a key, add/remove point
             x, y = int(event.xdata), int(event.ydata)
+            if event.inaxes == self.main_axes[2]:
+                x += self.zoom_center[0]
+                y += self.zoom_center[1]
+
             if event.button == 1:
                 # left click - add point
                 self._left_click(x, y)
@@ -355,10 +360,6 @@ class SplineBuilder(object):
                 # right click - remove last
                 self._right_click()
 
-            # update the figure
-            # -----------------
-            self.update_fig()
-
         elif self.press_key == 'z':  # set zoom image
             axe = None
             for i in range(len(self.main_axes)):
@@ -368,16 +369,20 @@ class SplineBuilder(object):
                 return
 
             case = {0: 'image', 1: 'grad', 3: 'grady'}
-
-            self.image.set_zoom(int(event.xdata), int(event.ydata), case[axe])
-
+            x1, y1, _, _ = self.image.set_zoom(int(event.xdata), int(event.ydata), case[axe])
+            self.zoom_center = [x1, y1]
             self.main_axes[2].imshow(
                 self.image.get_zoom(),
                 cmap='pink', interpolation='bicubic'
             )
 
-            self.main_fig.canvas.draw()
+        elif self.press_key == 'x':
+            x, y = self.point.get_closer(int(event.xdata), int(event.ydata))
+            self.point.remove_point(x, y)
 
+        # update the figure
+        # -----------------
+        self.update_fig()
 
         # new quicker method
         """
@@ -549,6 +554,7 @@ class SplineBuilder(object):
         """When release a key."""
         if self.press_key == 'v':
             plt.close('all')
+
         self.press_key = None
 
     def deplace_release(self, event):

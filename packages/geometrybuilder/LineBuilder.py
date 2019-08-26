@@ -18,6 +18,7 @@ from scipy import interpolate
 from scipy.interpolate import UnivariateSpline
 
 from matplotlib import pyplot as plt
+from matplotlib import patches
 
 
 # usefull methods
@@ -40,11 +41,158 @@ class Point:
         """Init the class."""
         self.x = []
         self.y = []
+        self.sx = []
+        self.sy = []
 
     def add_point(self, x, y):
-        """Add a point by specifying location."""
+        """Add a point by specifying location.
+
+        input
+        -----
+            x: int
+                x position of the point
+            y: int
+                y position of the point
+        """
         self.x.append(x)
         self.y.append(y)
+
+    def set_new_location(self, x, y, x_new, y_new):
+        """Redefine location of a point.
+
+        input
+        -----
+            x, y: int or list
+                location of the point to change
+            x_new, y_new: int or list
+                new coordinate of the point
+        """
+        # convert in list if int
+        # --------------
+        if type(x) is int:
+            x, y, x_new, y_new = [x], [y], [x_new], [y_new]
+
+        # loop to chane coordinate
+        for i in range(len(x)):
+            # find the index of x, y
+            index = self.get_index_by_location(x[i], y[i])
+
+            # change coordinate
+            self.x[index] = x_new[i]
+            self.y[index] = y_new[i]
+
+    def set_selected_by_area(self, x0, y0, dx, dy):
+        """Set point as seleted in an area.
+
+        input
+        -----
+            xmin, ymin: int
+                Top left coordinate of the area
+            dx, dy: int
+                width and height of the rectangle
+        """
+        # if dx/dy are negative
+        # ------
+        if dx < 0:
+            x0 = x0+dx
+            dx *= -1
+        if dy < 0:
+            y0 = y0+dy
+            dy *= -1
+
+        # loop over all ix to check if there are in the area
+        # ------------
+        for i in range(len(self.x)):
+            if (
+                self.x[i] < x0+dx and self.x[i] > x0 and
+                self.y[i] < y0+dy and self.y[i] > y0
+            ):
+                # check if is already selected
+                # -------------------
+                isInSelection = False
+                for j in range(len(self.sx)):
+                    if self.sx[j] == self.x[i] and self.sy[j] == self.y[i]:
+                        isInSelection = True
+
+                # if not already selected -> add to selected list
+                # ---------------
+                if not isInSelection:
+                    self.sx.append(self.x[i])
+                    self.sy.append(self.y[i])
+
+    def set_selected_by_location(self, x, y):
+        """Set point as selected by location(s).
+
+        input
+        -----
+            x, y: int or list
+                location of the point(s) to select
+        """
+        if type(x) is int:  # convert in a list
+            x = [x]
+            y = [y]
+
+        # loop for all given point
+        # -----------
+        for k in range(len(x)):
+
+            # find the point in the points list
+            # ----------------
+            # if the point don't exist, the coordinate is ignore
+            for i in range(len(self.x)):
+                if self.x[i] == x[k] and self.y[i] == y[k]:
+                    # check if is already selected
+                    # -------------------
+                    isInSelection = False
+                    for j in range(len(self.sx)):
+                        if self.sx[j] == x[k] and self.sy[j] == y[k]:
+                            isInSelection = True
+
+                    # if not already selected -> add to selected list
+                    # ---------------
+                    if not isInSelection:
+                        self.sx.append(x[k])
+                        self.sy.append(y[k])
+
+    def remove_selected_by_area(self, x0, y0, dx, dy):
+        """Remove point in an area.
+
+        input
+        -----
+            xmin, ymin: int
+                Top left coordinate of the area
+            dx, dy: int
+                width and height of the rectangle
+
+        return
+        ------
+            c : int
+                Number of deleted points
+        """
+        # if dx/dy are negative
+        # --------------
+        if dx < 0:
+            x0 = x0+dx
+            dx *= -1
+        if dy < 0:
+            y0 = y0+dy
+            dy *= -1
+
+        c = 0  # number of del point - avoid outof range
+        for i in range(len(self.sx)):
+            if (
+                self.sx[i-c] < x0+dx and self.sx[i-c] > x0 and
+                self.sy[i-c] < y0+dy and self.sy[i-c] > y0
+            ):
+                del(self.sx[i-c])
+                del(self.sy[i-c])
+                c += 1
+        return c
+
+    def reset_selection(self):
+        """Reset selected point."""
+        self.sx = []
+        self.sy = []
 
     def remove_point(self, x, y):
         """Delete a point by specifying location."""
@@ -59,9 +207,35 @@ class Point:
             del(self.x[-1])
             del(self.y[-1])
 
+    def get_one_point_by_location(self, x, y):
+        """Return point of the coordinate.
+
+        Return
+        ------
+            Point coordinate or empty if the point is not in the list.
+        """
+        for i in range(len(self.x)):
+            if self.x[i] == x and self.y[i] == y:
+                return self.x[i], self.y[i]
+
+    def get_index_by_location(self, x, y):
+        """Get the index for coordinate.
+
+        return
+        ------
+            empty if the point does not exist. Else return the index.
+        """
+        for i in range(len(self.x)):
+            if self.x[i] == x and self.y[i] == y:
+                return i
+
     def get_point(self):
         """Return points location."""
         return self.x, self.y
+
+    def get_selected_point(self):
+        """Return selected point."""
+        return self.sx, self.sy
 
     def get_closer(self, x, y):
         """Return closer point."""
@@ -97,6 +271,7 @@ class Point:
 
 class Image:
     """Special class to manipulate image."""
+
     def __init__(self):
         """Init the class."""
         self.im = None
@@ -162,7 +337,59 @@ class Image:
         return self.grady
 
     def get_zoom(self):
+        """Return zoom image."""
         return self.zoom
+
+
+class Rectangle:
+    """Rectangle class to select."""
+
+    def __init__(self):
+        """Init the class."""
+        self.x = 0
+        self.y = 0
+        self.dx = 0
+        self.dy = 0
+        self.rect = patches.Rectangle(
+                    (self.x, self.y), self.dx, self.dy,
+                    linewidth=2, edgecolor='tab:orange', fill=None,
+                    alpha=.5
+        )
+
+    def set_origin(self, x, y):
+        """Set the origin point."""
+        self.x = x
+        self.y = y
+        self.rect.set_x(x)
+        self.rect.set_y(y)
+
+    def set_size(self, x, y):
+        """Set width and height of the rectangle."""
+        self.dx = x - self.x
+        self.dy = y - self.y
+
+        self.rect.set_width(self.dx)
+        self.rect.set_height(self.dy)
+
+    def add_to_ax(self, ax):
+        """Add the rectangle to an ax.
+
+        caution
+        -------
+            The rectangle can be use only for one axe. To plot it in another
+            please use reset before.
+        """
+        ax.add_patch(self.rect)
+
+    def get_rect(self):
+        """Return rectangle origin and dimension."""
+        return self.x, self.y, self.dx, self.dy
+
+    def reset(self):
+        """Reset the rectangle."""
+        self.rect.remove()
+        self.__init__()
+
 
 class SplineBuilder(object):
     """
@@ -177,6 +404,8 @@ class SplineBuilder(object):
 
     def __init__(self, image, image_grad, image_grady):
         """Do the initiation."""
+        self.help()
+
         # store data
         # ----------
         self.image = Image()
@@ -195,8 +424,8 @@ class SplineBuilder(object):
         # init states button
         # ------------------
         self.press_key = None
-        self.zoom_center = []
-
+        self.rect = None
+        self.drag = None
 
         """Old stuff."""
         # self.intensity = intensity
@@ -230,11 +459,14 @@ class SplineBuilder(object):
 
         # enable connections
         # ------------------
-        # self.cid1 = self.main_axes[0].figure.canvas.mpl_connect(
-        #     'button_press_event', self.enable_press
-        # )
-        self.cid = self.main_fig.canvas.mpl_connect(
-            'button_release_event', self.on_press
+        self.p_click = self.main_fig.canvas.mpl_connect(
+            'button_press_event', self.on_press_click
+        )
+        self.m_click = self.main_fig.canvas.mpl_connect(
+            'motion_notify_event', self.on_motion_click
+        )
+        self.r_click = self.main_fig.canvas.mpl_connect(
+            'button_release_event', self.on_release_click
         )
         self.cid_key = self.main_fig.canvas.mpl_connect(
             'key_press_event', self.on_press_key
@@ -249,11 +481,55 @@ class SplineBuilder(object):
         # self.xs_interp = np.array(self.line1.get_xdata(), dtype=np.int)
         # self.ys_interp = np.array(self.line1.get_ydata(), dtype=np.int)
 
+    def help(self):
+        """Print instruction."""
+        print(
+            """
+            press key :
+            -----------
+                h : help
+                s : select mode (enable/disable)
+                g : guideline
+                d : deplacement mode (enable/disable)
+                hold z + click : zoom on area
+                hold x + click : remove closer point
+
+            add mode
+            --------
+                left : add point
+                right : remove last point
+                middle : remove closer point
+
+            select mode
+            -----------
+                s : disable select mode
+                left-click + drag : create area, release to make the selection.
+                right-click + drag : create area, release to remove point in
+                    the area
+                d : enable deplacement mode
+                backspace : delete selected point
+
+            deplace mode
+            ------------
+                d : disable deplace mode
+                up/right/down/left : deplace all selected point (shift = x10)
+                click-drage-release : deplace point
+                s : enable select mode
+            """
+        )
+
     def generate_home(self):
         """Generate the main figure."""
         self.main_fig = plt.figure(figsize=(16, 9))
         self.main_fig.canvas.set_window_title('Main Figure')
         self.main_fig.tight_layout(pad=.01, h_pad=.01, w_pad=.01)
+
+        # disable shortcut
+        for param in plt.rcParams:
+            if 'keymap' in param:
+                plt.rcParams[param] = ''
+
+        # self.main_fig.keymap.save = ''
         titles = [
             'Original image',
             'Gradient magnitude',
@@ -264,6 +540,7 @@ class SplineBuilder(object):
         self.main_axes = []
         self.main_frontLines = []
         self.main_frontPoints = []
+        self.main_selectedPoints = []
         for i in range(4):
             self.main_axes.append(plt.subplot(2, 2, i+1))
             self.main_axes[i].axis('off')
@@ -272,27 +549,43 @@ class SplineBuilder(object):
             # front line
             self.main_frontLines.append(self.main_axes[i].plot([], [])[0])
             self.main_frontLines[i].set_linestyle('-')
-            self.main_frontLines[i].set_color('b')
+            self.main_frontLines[i].set_color('tab:blue')
             self.main_frontLines[i].set_linewidth(.8)
 
             # clicked points
             self.main_frontPoints.append(self.main_axes[i].plot([], [])[0])
             self.main_frontPoints[i].set_linestyle('None')
             self.main_frontPoints[i].set_marker('o')
-            self.main_frontPoints[i].set_markeredgecolor('b')
+            self.main_frontPoints[i].set_markeredgecolor('tab:blue')
+            self.main_frontPoints[i].set_markerfacecolor('None')
+
+            # selected points
+            self.main_selectedPoints.append(self.main_axes[i].plot([], [])[0])
+            self.main_selectedPoints[i].set_linestyle('None')
+            self.main_selectedPoints[i].set_marker('o')
+            self.main_selectedPoints[i].set_markeredgecolor('tab:blue')
+            self.main_selectedPoints[i].set_markerfacecolor('tab:blue')
 
         self.main_axes[0].imshow(
-            self.image.get_image(), cmap='pink', interpolation='bicubic'
+            self.image.get_image(), cmap='pink', interpolation='bicubic',
+            # lut=2**12
         )
         self.main_axes[1].imshow(
-            self.image.get_grad(), cmap='pink', interpolation='bicubic'
+            self.image.get_grad(), cmap='pink', interpolation='bicubic',
+            # lut=2**12
         )
         self.main_axes[3].imshow(
-            self.image.get_grady(), cmap='pink', interpolation='bicubic'
+            self.image.get_grady(), cmap='pink', interpolation='bicubic',
+            # lut=2**12
         )
 
-    def enable_press(self, event):
-        self.press = True
+        self.disp_mode = self.main_axes[0].annotate(
+            '',
+            xy=(.975, .975), xycoords='figure fraction',
+            horizontalalignment='right', verticalalignment='top',
+            fontsize=12,
+        )
+        self.disp_mode.set_text('Mode : Add point')
 
     def update_fig(self):
         """Update the figure."""
@@ -304,8 +597,10 @@ class SplineBuilder(object):
         for line in self.main_frontLines:
             line.set_data(x, y)
 
+        x, y = self.point.get_selected_point()
+        for pt in self.main_selectedPoints:
+            pt.set_data(x, y)
         self.main_fig.canvas.draw()
-        # self.line4.figure.canvas.draw()
 
     def _right_click(self):
         """Remove last Point."""
@@ -319,7 +614,49 @@ class SplineBuilder(object):
         x, y = self.point.get_closer(x, y)
         self.point.remove_point(x, y)
 
-    def on_press(self, event):
+    def on_press_click(self, event):
+        """Press click event.
+
+
+        """
+
+        # check if zoom is activated
+        # --------------------------
+        for line in self.main_frontLines:
+            if line.axes.get_navigate_mode() == 'ZOOM':
+                return
+
+        # check if the click is not in one axe
+        # ------------------
+        if event.inaxes not in self.main_axes:
+            return
+
+        if self.press_key == 's':
+            self.patch = self.rect.add_to_ax(event.inaxes)
+            self.rect.set_origin(int(event.xdata), int(event.ydata))
+
+    def on_motion_click(self, event):
+        # check that there is no event in this mode
+        # ----------------------------
+        if self.press_key not in ['s']:
+            return
+
+        # check if zoom is activated
+        # --------------------------
+        for line in self.main_frontLines:
+            if line.axes.get_navigate_mode() == 'ZOOM':
+                return
+
+        # check if the click is not in one axe
+        # ------------------
+        if event.inaxes not in self.main_axes:
+            return
+
+        if self.press_key == 's' and event.button is not None:
+            self.rect.set_size(int(event.xdata), int(event.ydata))
+            self.main_fig.canvas.draw()
+
+    def on_release_click(self, event):
         """Create line on clicking on the graph.
 
         Actions
@@ -340,8 +677,8 @@ class SplineBuilder(object):
         if event.inaxes not in self.main_axes:
             return
 
-        # action from click
-        # -----------------
+        # action from click/hold key
+        # -------------------------
         if self.press_key is None:  # if we don't press a key, add/remove point
             x, y = int(event.xdata), int(event.ydata)
             if event.inaxes == self.main_axes[2]:
@@ -369,47 +706,36 @@ class SplineBuilder(object):
                 return
 
             case = {0: 'image', 1: 'grad', 3: 'grady'}
-            x1, y1, _, _ = self.image.set_zoom(int(event.xdata), int(event.ydata), case[axe])
+            x1, y1, _, _ = self.image.set_zoom(
+                int(event.xdata),
+                int(event.ydata),
+                case[axe]
+            )
             self.zoom_center = [x1, y1]
             self.main_axes[2].imshow(
                 self.image.get_zoom(),
                 cmap='pink', interpolation='bicubic'
             )
 
-        elif self.press_key == 'x':
+        elif self.press_key == 'x':  # remove closer point
             x, y = self.point.get_closer(int(event.xdata), int(event.ydata))
             self.point.remove_point(x, y)
+
+        elif self.press_key == 's':  # select points
+            self.rect.set_size(int(event.xdata), int(event.ydata))
+            if event.button == 1:
+                self.point.set_selected_by_area(*self.rect.get_rect())
+            elif event.button == 3:
+                self.point.remove_selected_by_area(*self.rect.get_rect())
+            self.rect.reset()
+            self.update_fig()
+
+        elif self.press_key == 'd':  # deplace point
+            None
 
         # update the figure
         # -----------------
         self.update_fig()
-
-        # new quicker method
-        """
-        if len(self.xs_interp) > 1:
-            x_new = self.xs[-1]  # get last x created
-            x_sort = np.sort(self.xs)  # sort xs
-            if x_new == min(self.xs_interp):
-                x_min = x_sort[0]
-                x_max = x_sort[1]
-            elif x_new == max(self.xs_interp):
-                x_min = x_sort[-2]
-                x_max = x_sort[-1]
-            else:
-                x_min = x_sort[(x_sort == x_new)-1]
-                x_max = x_sort[(x_sort == x_new)+1]
-
-            x_sort = self.xs_interp[x_min:x_max]
-            for n in range(7):
-                if self.r_intensity[n] in x_sort:
-                    z = self.z_intensity[x_sort == self.r_intensity]
-                    intens = self.intensity[z, n]
-                    self.axes2[n].plot(
-                        intens,
-                        z, 'or', ms=6
-                    )
-                    self.axes2[n].figure.canvas.draw()
-        """
 
     def on_press_intensity(self, event):
         for a in self.axes2:
@@ -459,25 +785,6 @@ class SplineBuilder(object):
             self.interpolate()
             self.update_fig()
 
-    def on_motion(self, event):
-        axe = None
-        for i in range(len(self.main_axes)):
-            if event.inaxes == self.main_axes[i]:
-                axe = i
-        if axe is None:  # cursor is no in one axe
-            return
-
-        case = {0: 'image', 1: 'grad', 3: 'grady'}
-
-        self.image.set_zoom(int(event.xdata), int(event.ydata), case[axe])
-
-        self.main_axes[2].imshow(
-            self.image.get_zoom(),
-            cmap='pink', interpolation='bicubic'
-        )
-
-        self.main_fig.canvas.draw()
-
     def on_press_key(self, event):
         """Keyboards event.
 
@@ -491,9 +798,9 @@ class SplineBuilder(object):
             'g' : gradient image for zoom axe
             'y' : gradient_y image for zoom axe
         """
+        print(event.key)
         if self.press_key is None:
             self.press_key = event.key
-
 
         """
         if event.key in ['v']:
@@ -555,7 +862,100 @@ class SplineBuilder(object):
         if self.press_key == 'v':
             plt.close('all')
 
-        self.press_key = None
+        elif self.press_key == 's':
+            if self.rect is None:  # enable select mode
+                self.rect = Rectangle()
+                self.disp_mode.set_text(
+                    """Mode : Select/remove point (left/right click)"""
+                )
+                self.update_fig()
+
+            elif event.key in ['s', 'd']:  # disable select mode / change mode
+                self.press_key = None
+                self.rect = None
+                self.disp_mode.set_text('Mode : Add point')
+                if event.key == 'd':
+                    self.press_key = event.key
+                    self.drag = [0, 0]
+                    self.disp_mode.set_text(
+                        """Mode : Deplace point (arrow or drag-click)"""
+                    )
+                self.update_fig()
+
+            elif event.key == 'backspace':  # erase selected point
+                x, y = self.point.get_selected_point()
+                for i in range(len(x)):
+                    self.point.remove_point(x[i], y[i])
+                    self.point.reset_selection()
+                    self.update_fig()
+
+        elif self.press_key == 'd':
+            if self.drag is None:  # enable deplacement mode
+                self.drag = [0, 0]
+                self.disp_mode.set_text(
+                    """Mode : Deplace point (arrow or drag-click)"""
+                )
+                self.update_fig()
+
+            elif event.key in ['d', 's']:  # disable deplacement mode / change mode
+                self.drag = None
+                self.press_key = None
+                self.disp_mode.set_text('Mode : Add point')
+                if event.key == 's':
+                    self.press_key = event.key
+                    self.rect = Rectangle()
+                    self.disp_mode.set_text(
+                        """Mode : Select/remove point (left/right click)"""
+                    )
+                self.update_fig()
+
+            elif len(self.point.get_selected_point()) < 1:
+                print(
+                    """To deplace point, please select one or
+                     more point before."""
+                )
+
+            elif 'up' in event.key:
+                x, y = self.point.get_selected_point()
+                ynew = [pt - (10 if 'shift' in event.key else 1) for pt in y]
+                self.point.set_new_location(x, y, x, ynew)
+                self.point.reset_selection()
+                self.point.set_selected_by_location(x, ynew)
+                self.update_fig()
+
+            elif 'down' in event.key:
+                x, y = self.point.get_selected_point()
+                ynew = [pt + (10 if 'shift' in event.key else 1) for pt in y]
+                self.point.set_new_location(x, y, x, ynew)
+                self.point.reset_selection()
+                self.point.set_selected_by_location(x, ynew)
+                self.update_fig()
+
+            elif 'right' in event.key:
+                x, y = self.point.get_selected_point()
+                xnew = [pt + (10 if 'shift' in event.key else 1) for pt in x]
+                self.point.set_new_location(x, y, xnew, y)
+                self.point.reset_selection()
+                self.point.set_selected_by_location(xnew, y)
+                self.update_fig()
+
+            elif 'left' in event.key:
+                x, y = self.point.get_selected_point()
+                xnew = [pt - (10 if 'shift' in event.key else 1) for pt in x]
+                self.point.set_new_location(x, y, xnew, y)
+                self.point.reset_selection()
+                self.point.set_selected_by_location(xnew, y)
+                self.update_fig()
+
+        elif self.press_key == 'h':
+            self.help()
+            self.press_key = None
+
+        elif self.press_key == 'g':
+            
+
+        else:
+            self.press_key = None
 
     def deplace_release(self, event):
         """

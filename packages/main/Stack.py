@@ -77,6 +77,40 @@ def log(x):
     print(x, file=sys.stderr)
 
 
+class Geometry:
+    """Class containing the drop geometry."""
+    def __init__(self):
+        """Init the class."""
+        self.r0 = None
+        self.z0 = None
+        self.zf = None
+        self.rc = None
+
+    def set_r0(self, r0):
+        """Set the foot drop radius."""
+        self.r0 = r0
+
+    def set_rc(self, rc):
+        """Set the radius of the drop center."""
+        self.rc = rc
+
+    def set_z0(self, z0):
+            """Set the initiale height of the drop."""
+            self.z0 = z0
+
+    def set_zf(self, zf):
+        """Set the initile height of the drop."""
+        self.zf = zf
+
+    def get_theta(self):
+        """Return the initiale contact angle of the drop."""
+        None
+
+    def get_volume(self):
+        """Return the initiale volume of the drop."""
+        None
+
+
 class Stack(object):
     """This class allow you to treat image by block.
 
@@ -143,7 +177,7 @@ class Stack(object):
 
         if self.data_directory is None:
             raise IndexError(
-                'This experiment is not in the database, please add it before'
+                'This experiment may not in the database, please add it before'
             )
 
         self.create_directory()
@@ -290,25 +324,25 @@ class Stack(object):
             if len(args) == 4:
                 self.current_image.crop(*args)
             else:
-                raise StackEAError(
+                raise ValueError(
                     'Crop treatment requires 4 arguments'
                 )
         elif treatment == 'clahe':
             if len(args) == 2 or len(args) == 0:
                 self.current_image.equalize_hist_by_clahe(*args)
             else:
-                raise StackEAError(
+                raise ValueError(
                     'Equalize treatment require 0 or 2 arguments'
                 )
         elif treatment == 'equalize':
             if len(args) == 1 or len(args) == 0:
                 self.current_image.equalize_hist(*args)
             else:
-                raise StackEAError(
+                raise ValueError(
                     'Equalize treatment require 0 or 1 argument'
                 )
         else:
-            raise StackEAError(
+            raise ValueError(
                 'The treatment you are trying to apply does not exist'
             )
 

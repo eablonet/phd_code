@@ -79,6 +79,7 @@ def log(x):
 
 class Geometry:
     """Class containing the drop geometry."""
+
     def __init__(self):
         """Init the class."""
         self.r0 = None
@@ -102,6 +103,22 @@ class Geometry:
         """Set the initile height of the drop."""
         self.zf = zf
 
+    def get_r0(self):
+        """Return the foot drop radius."""
+        return self.r0
+
+    def get_rc(self):
+        """Return the radius of the drop center."""
+        return self.rc
+
+    def get_z0(self):
+        """Set the initiale height of the drop."""
+        return self.z0
+
+    def get_zf(self):
+        """Set the initile height of the drop."""
+        return self.zf
+
     def get_theta(self):
         """Return the initiale contact angle of the drop."""
         None
@@ -119,9 +136,6 @@ class Stack(object):
     data_directory : str
         directory containing images
 
-    Methods
-    -------
-    lot of
     """
 
     def __init__(self, date=None, serie=None):
@@ -139,6 +153,8 @@ class Stack(object):
         If date is not None, but serie is None, will read the first serie (1).
 
         """
+        self.geom = Geometry()
+
         if date is not None:
             if serie is None:
                 self.read_by_date(date, 1)
@@ -163,7 +179,8 @@ class Stack(object):
 
         """
         self.data_directory = None
-        df = rd.get_data()
+        df = rd.get_data()  # read data in googlesheet.
+
         if date in list(df['date']):
             if serie in list(df[df['date'] == date]['serie']):
                 self.data_directory = (
@@ -174,6 +191,16 @@ class Stack(object):
                 self.datas = df[df['date'] == date][
                     df['serie'] == float(serie)
                 ].copy()
+                self.data = df[df['date'] == date][
+                    df['serie'] == float(serie)
+                ].copy()
+
+                # allocate data Values
+                # ---------------------
+                self.geom.set_r0(self.data['r0'].values)
+                self.geom.set_rc(self.data['rc'].values)
+                self.geom.set_z0(self.data['z0'].values)
+                self.geom.set_zf(None)
 
         if self.data_directory is None:
             raise IndexError(
@@ -305,6 +332,39 @@ class Stack(object):
         self.current_image = ip.ImageProcessing(
                 self.image_list[ni-1]  # indexes starts at 0 in python
         )
+
+    def get_image(self, ni=-1):
+        """
+        Read the image indicate by is number.
+
+        Parameters
+        ----------
+        ni : int
+            Image number to load. -1 to load current image image number.
+            Default -1.
+
+        """
+        if ni == -1:
+            ni = self.current_image_number
+
+        elif ni in self.range_images:
+            ni = ni
+
+        else:
+            print(
+                (
+                    "ERROR reading image {}. It my be out of range\n" +
+                    "Current image will be 1."
+                ).format(
+                    ni
+                )
+            )
+            self.read_image(1)
+
+        image = ip.ImageProcessing(
+            self.image_list[ni-1]  # indexes starts at 0 in python
+        )
+        return image
 
     def treatment(self, treatment, *args, plot=True):
         """
@@ -461,8 +521,27 @@ class Stack(object):
             print('\trc : ', rc)
             print('Please add this value in the table')
 
+    def get_spatio_col(self, row):
+        """Return the diagram spatio temporel at a specific row.
+
+        A spatio is the juxtaposition of column intensity over time.
+        We obtain an image of y over t, not y over x.
+        """
+        sp = np.zeros(self.n_image_tot, self.current_image.size[0])
+        for n in self.range_images:
+            im = self.get_image(n)
+            it, _ = im.col_intensity(row)
+            sp[n] = it
+        return sp
+
     def tracker(self, folder_name='front', pts=[], cmp='pink'):
-        """Get the front manually."""
+        """Get the front manually.
+
+        Steps :
+        -------
+            1. get geometry -- rc, rl, rr, zb, z0  & zf
+            2. get volume thanks to double interpolation time + space
+        """
         temp = self.current_image_number  # store current image loaded
 
         # load data from database
@@ -505,6 +584,21 @@ class Stack(object):
         ref_pente = float(self.datas.iloc[0]['alpha'])
         # substrate inclination
 
+        # Ste 1 - Get geometry
+        # ------------
+        im_init = self.get_image(time_ref)
+        im_end = self.get_image(time_end)
+        geom = lb.Geometry(im_init, im_end)
+        plt.show()
+        
+        geom = geom.get_geom()
+
+        # Step 2 - Double interpolation to detect contour
+        # ----------------
+        None
+
+        # Step 3 - Front detection
+        # ---------------
         x, y = [], []  # points locations
         x_interp, y_interp = [], []  # interpolate line
         for n in range(time_ref, time_end):
@@ -520,14 +614,23 @@ class Stack(object):
                 5, 'sobel', 'y', 'same', im=image
             )
 
-            line = lb.SplineBuilder(image, im_grad, im_grady)
+            # create the tracker
+            # -----------------
+            line = lb.SplineBuilder(image, im_grad, im_grady, self.geom)
             line.add_points(x, y)
             line.add_line(x_interp, y_interp)
-
+            line.set_ref_line(x_interp, y_interp)
             plt.show()
 
+            # get the information from the tracker
+            # ------------------
             x, y = line.point.get_point()
             x_interp, y_interp = line.point.get_interpolation()
+
+            # each 10 image save a temp file
+            # -------------------------
+            if n % 10 == 0:
+                None
 
             im_grad = self.current_image.gradient(
                 5, 'sobel', 'mag', 'same', im=im
@@ -817,9 +920,6 @@ class Stack(object):
 
             points[n, linebuilder.xs] = linebuilder.ys
             interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
-
-            if n % 10 == 0:
-                None
 
         if not os.path.isdir(self.data_directory + folder_name):
             os.makedirs(self.data_directory + folder_name)

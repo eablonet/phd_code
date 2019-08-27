@@ -52,9 +52,12 @@ class ImageProcessing():
         elif impath[-4:] == '.npy':
             self.image = np.load(impath)
 
+        self.width = self.image.shape[1]
+        self.height = self.image.shape[0]
+
         self.size = self.image.shape
 
-    def show_info(self):
+    def __repr__(self):
         """
         Show info relative to the image.
 
@@ -66,11 +69,23 @@ class ImageProcessing():
             5. last image number of the stack
         """
         print('Image path : ', self.image_path)
-        print('Image size : ', self.size)
+        print('Image size (w x h) : ', self.widths + 'x' + self.height)
+
+    def get_image(self):
+        """Return the image."""
+        return self.image
+
+    def get_width(self):
+        """Return the image width."""
+        return self.width
+
+    def get_height(self):
+        """Return the image height."""
+        return self.height
 
     def show_image(self):
         """Display the image."""
-        plt.figure()
+        plt.figure(figsize=(16, 9))
         plt.imshow(self.image, cmap='gray')
         plt.show()
 
@@ -107,6 +122,36 @@ class ImageProcessing():
             ]
         self.size = self.image.shape
 
+    def get_crop(self, xmin, xmax, ymin, ymax):
+        """
+        Permits to crop the image thanks to coordinate.
+
+        input:
+            xmin: int
+                mininaml x coordinate
+            xmax: int
+                maximal x coordinate
+            ymin: int
+                minimal y coordinate
+            ymax: int
+                maximal y coordinate
+        """
+        if xmin < 0:
+            xmin = 0
+        if ymin < 0:
+            ymin = 0
+        if xmax > self.size[1]:
+            xmax = self.size[1]
+        if ymax > self.size[0]:
+            ymax = self.size[0]
+
+        image = self.image[
+                ymin:ymax,
+                xmin:xmax
+            ]
+
+        return image
+
     def row_intensity(self, row, N=7):
         """
         Display the intensity on designed lined number.
@@ -119,8 +164,6 @@ class ImageProcessing():
             intensity, np.ones((N,))/N, mode='valid'
         )
         return intensity, it_a
-        # plt.figure()
-        # plt.plot(intensity)
 
     def col_intensity(self, col, N=7):
         """

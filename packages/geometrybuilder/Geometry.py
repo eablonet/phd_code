@@ -15,7 +15,7 @@ class Geometry(object):
 
     """
 
-    def __init__(self, ax1, ax2, h, w):
+    def __init__(self, im_init, image_end, h, w):
         """Do the initiation."""
         self.ax1 = ax1
         self.h = h
@@ -99,6 +99,14 @@ class Geometry(object):
         )
 
         self.sel = 'rc_left'
+
+    def generate_home(self):
+        self.main_fig = plt.figure()
+        self.main_fig.canvas.set_window_title('Get the geometry')
+
+        self.main_ax = []
+        for i in range(2):
+            self.main_ax.append(plt.subplot(1, 2, i+1))
 
     def update_fig(self):
         """Update the figure."""

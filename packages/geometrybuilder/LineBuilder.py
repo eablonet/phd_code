@@ -11,26 +11,34 @@ eablonet
 
 # import
 # ------
+# sys
 import sys
+
+# math
 import numpy as np
 from scipy import interpolate
+import peakutils as peaks  # find peaks method
 
-from scipy.interpolate import UnivariateSpline
-
+# plot
 from matplotlib import pyplot as plt
 from matplotlib import patches
+
+# local packages
+# --------------
+from packages.design import color as ea_color
+from packages.library import main as ea_math
 
 
 # usefull methods
 # ---------------
 def log(*x):
-    """Print in sys."""
+    """Print insys."""
     print(*x, file=sys.stderr)
 
 
 def euclidian_dist(x0, y0, x1, y1):
     """Euclidian distance."""
-    d = np.sqrt((x0-x1)**2 + (y0-y1)**2)
+    d = np.sqrt((x0 - x1)**2 + (y0 - y1)**2)
     return d
 
 
@@ -94,18 +102,18 @@ class Point:
         # if dx/dy are negative
         # ------
         if dx < 0:
-            x0 = x0+dx
+            x0 = x0 + dx
             dx *= -1
         if dy < 0:
-            y0 = y0+dy
+            y0 = y0 + dy
             dy *= -1
 
         # loop over all ix to check if there are in the area
         # ------------
         for i in range(len(self.x)):
             if (
-                self.x[i] < x0+dx and self.x[i] > x0 and
-                self.y[i] < y0+dy and self.y[i] > y0
+                self.x[i] < x0 + dx and self.x[i] > x0 and
+                self.y[i] < y0 + dy and self.y[i] > y0
             ):
                 # check if is already selected
                 # -------------------
@@ -172,20 +180,20 @@ class Point:
         # if dx/dy are negative
         # --------------
         if dx < 0:
-            x0 = x0+dx
+            x0 = x0 + dx
             dx *= -1
         if dy < 0:
-            y0 = y0+dy
+            y0 = y0 + dy
             dy *= -1
 
         c = 0  # number of del point - avoid outof range
         for i in range(len(self.sx)):
             if (
-                self.sx[i-c] < x0+dx and self.sx[i-c] > x0 and
-                self.sy[i-c] < y0+dy and self.sy[i-c] > y0
+                self.sx[i - c] < x0 + dx and self.sx[i - c] > x0 and
+                self.sy[i - c] < y0 + dy and self.sy[i - c] > y0
             ):
-                del(self.sx[i-c])
-                del(self.sy[i-c])
+                del(self.sx[i - c])
+                del(self.sy[i - c])
                 c += 1
         return c
 
@@ -278,10 +286,15 @@ class Image:
         self.grad = None
         self.grady = None
         self.zoom = None
+        self.width = None
+        self.height = None
 
     def set_image(self, im):
         """Set the image."""
         self.im = im
+        self.width = np.shape(im)[1]
+        self.height = np.shape(im)[0]
+        print(self.width, self.height)
 
     def set_grad(self, grad_im):
         """Set the gradient image."""
@@ -301,23 +314,23 @@ class Image:
             'grad': self.grad,
             'grady': self.grady
         }
-        w = int(width/2)
-        h = int(height/2)
+        w = int(width / 2)
+        h = int(height / 2)
         im_w = np.shape(case[im])[1]
         im_h = np.shape(case[im])[0]
 
-        x1 = (x-w)*(x > w)   # = x1-le si x1 > le 0 sinon 0
-        y1 = (y-h)*(y > h)
+        x1 = (x - w) * (x > w)   # = x1-le si x1 > le 0 sinon 0
+        y1 = (y - h) * (y > h)
 
         x2 = (
-            (x+w) *
-            (x < im_w - w+1) + im_w *
-            (1 - (x < im_w - w+1))
+            (x + w) *
+            (x < im_w - w + 1) + im_w *
+            (1 - (x < im_w - w + 1))
         )
         y2 = (
-            (y+h) *
-            (y < im_h - h+1) + im_h *
-            (1 - (y < im_h - h+1))
+            (y + h) *
+            (y < im_h - h + 1) + im_h *
+            (1 - (y < im_h - h + 1))
         )
 
         self.zoom = case[im][y1:y2, x1:x2]  # crop the image
@@ -340,6 +353,14 @@ class Image:
         """Return zoom image."""
         return self.zoom
 
+    def get_height(self):
+        """Return the height of the original image."""
+        return self.height
+
+    def get_width(self):
+        """Return the width of the original image."""
+        return self.width
+
 
 class Rectangle:
     """Rectangle class to select."""
@@ -351,9 +372,9 @@ class Rectangle:
         self.dx = 0
         self.dy = 0
         self.rect = patches.Rectangle(
-                    (self.x, self.y), self.dx, self.dy,
-                    linewidth=2, edgecolor='tab:orange', fill=None,
-                    alpha=.5
+            (self.x, self.y), self.dx, self.dy,
+            linewidth=2, edgecolor='tab:orange', fill=None,
+            alpha=.5
         )
 
     def set_origin(self, x, y):
@@ -391,6 +412,68 @@ class Rectangle:
         self.__init__()
 
 
+class Assistant:
+    """Define the assistant class."""
+
+    def __init__(self, image, r_guide):
+        """Init the class."""
+        self.r_guide = r_guide
+        self.generate_home()
+
+    def generate_home(self):
+        """Create the main figure."""
+        # init values
+        # ------------
+        self.intensity = []
+        self.intensity_crop = []
+        color = ea_color.color_met(7)
+
+        self.main_fig = plt.figure(figsize=(16, 6))
+
+        self.index = []
+        for k in range(7):
+            self.index.append([])
+            self.intensity.append(
+                ea_math.sliding_mean(
+                    self.image.get_grad()[:, self.r_guide[k]], 3,
+                )
+            )
+
+            front_r = int(self.ref_line[1][self.r_guide[k]])
+
+            self.intensity_crop.append(
+                self.intensity[k][front_r - 15:front_r + 6])
+
+            self.main_axes.append(plt.subplot(1, 7, k + 1))
+            self.main_axes[k].invert_yaxis()
+
+            plt.plot(self.intensity_crop, range(21), '-', c=color[k])
+            self.index[k].append(
+                peaks.indexes(
+                    self.intensity_crop,
+                    thres=.3,
+                    min_dist=3,
+                )
+            )
+
+            plt.plot(
+                [np.min(self.intensity_crop), np.max(self.intensity_crop)],
+                [15, 15],
+                '--', color='tab:red',
+            )
+
+            plt.plot(
+                self.intensity_crop[self.index], self.index,
+                ls='None',
+                marker='o', ms=4,
+                c='tab:green',
+            )
+
+    def get_point(self):
+        """Return the index of point."""
+        return self.index
+
+
 class SplineBuilder(object):
     """
     Create Line on graph.
@@ -402,7 +485,7 @@ class SplineBuilder(object):
 
     """
 
-    def __init__(self, image, image_grad, image_grady):
+    def __init__(self, image, image_grad, image_grady, geom):
         """Do the initiation."""
         self.help()
 
@@ -412,6 +495,7 @@ class SplineBuilder(object):
         self.image.set_image(image)
         self.image.set_grad(image_grad)
         self.image.set_grady(image_grady)
+        self.geom = geom
 
         # Plot the main figures
         # --------------
@@ -426,6 +510,8 @@ class SplineBuilder(object):
         self.press_key = None
         self.rect = None
         self.drag = None
+        self.guidLine = False
+        self.ref_line = None
 
         """Old stuff."""
         # self.intensity = intensity
@@ -490,6 +576,7 @@ class SplineBuilder(object):
                 h : help
                 s : select mode (enable/disable)
                 g : guideline
+                f : auto-find need to get
                 d : deplacement mode (enable/disable)
                 hold z + click : zoom on area
                 hold x + click : remove closer point
@@ -520,16 +607,21 @@ class SplineBuilder(object):
 
     def generate_home(self):
         """Generate the main figure."""
+        # Main figure cration
+        # ---------------
         self.main_fig = plt.figure(figsize=(16, 9))
         self.main_fig.canvas.set_window_title('Main Figure')
         self.main_fig.tight_layout(pad=.01, h_pad=.01, w_pad=.01)
 
-        # disable shortcut
+        # Disable shortcut
+        # ----------------
         for param in plt.rcParams:
             if 'keymap' in param:
                 plt.rcParams[param] = ''
 
-        # self.main_fig.keymap.save = ''
+        # Create the for axes
+        # -------------------
+        # Titles
         titles = [
             'Original image',
             'Gradient magnitude',
@@ -537,12 +629,28 @@ class SplineBuilder(object):
             'y-Gradient',
         ]
 
-        self.main_axes = []
-        self.main_frontLines = []
-        self.main_frontPoints = []
-        self.main_selectedPoints = []
+        # guideline
+        color = ea_color.color_met(7)  # generate 7 colors
+        self.r_guide = []  # init r_vector for guidLines \
+        # for the 7 position where we gonna look at the intensity
+        for i in range(7):
+            self.r_guide.append(
+                int(
+                    i * 1.8 * self.geom.get_r0() / 6 +
+                    self.geom.get_rc() - .9 * self.geom.get_r0()
+                )
+            )
+
+        # init vectors objects
+        # -------------------
+        self.main_axes = []  # 4 main axes
+        self.main_frontLines = []  # the front line for each axe
+        self.main_frontPoints = []  # the clicked dot for each axe
+        self.main_selectedPoints = []  # the selectedPoint for each axe
+        self.main_guideLine = []  # the guidLine for each axe size = (4, 7)
+
         for i in range(4):
-            self.main_axes.append(plt.subplot(2, 2, i+1))
+            self.main_axes.append(plt.subplot(2, 2, i + 1))
             self.main_axes[i].axis('off')
             self.main_axes[i].set_title(titles[i])
 
@@ -555,16 +663,23 @@ class SplineBuilder(object):
             # clicked points
             self.main_frontPoints.append(self.main_axes[i].plot([], [])[0])
             self.main_frontPoints[i].set_linestyle('None')
-            self.main_frontPoints[i].set_marker('o')
+            self.main_frontPoints[i].set_marker('x')
             self.main_frontPoints[i].set_markeredgecolor('tab:blue')
             self.main_frontPoints[i].set_markerfacecolor('None')
 
             # selected points
             self.main_selectedPoints.append(self.main_axes[i].plot([], [])[0])
             self.main_selectedPoints[i].set_linestyle('None')
-            self.main_selectedPoints[i].set_marker('o')
-            self.main_selectedPoints[i].set_markeredgecolor('tab:blue')
-            self.main_selectedPoints[i].set_markerfacecolor('tab:blue')
+            self.main_selectedPoints[i].set_marker('x')
+            self.main_selectedPoints[i].set_markeredgecolor('tab:orange')
+
+            self.main_guideLine.append([])
+            for k in range(7):
+                self.main_guideLine[i].append(
+                    self.main_axes[i].plot(
+                        [], [], ls='--', c=color[k], alpha=.4, lw=2
+                    )[0]
+                )
 
         self.main_axes[0].imshow(
             self.image.get_image(), cmap='pink', interpolation='bicubic',
@@ -615,11 +730,7 @@ class SplineBuilder(object):
         self.point.remove_point(x, y)
 
     def on_press_click(self, event):
-        """Press click event.
-
-
-        """
-
+        """Press click event."""
         # check if zoom is activated
         # --------------------------
         for line in self.main_frontLines:
@@ -636,6 +747,7 @@ class SplineBuilder(object):
             self.rect.set_origin(int(event.xdata), int(event.ydata))
 
     def on_motion_click(self, event):
+        """When drag the mouse."""
         # check that there is no event in this mode
         # ----------------------------
         if self.press_key not in ['s']:
@@ -757,7 +869,7 @@ class SplineBuilder(object):
             # look for the closet point from clic
             d = np.inf  # init distance pt from line
             z_out = 0
-            for z in self.z_intensity[y_curs-15:y_curs+15]:
+            for z in self.z_intensity[y_curs - 15:y_curs + 15]:
                 dx = x_curs - self.intensity[z, n]
                 dy = y_curs - z
                 if np.sqrt(dx**2 + dy**2) < d:
@@ -767,7 +879,7 @@ class SplineBuilder(object):
             # find the local maximum [+- 4px]
             it_max = 0  # init intensity maximum
             z_max = 0  # init z of maximum intensity
-            for z in self.z_intensity[z_out-4:z_out+4]:
+            for z in self.z_intensity[z_out - 4:z_out + 4]:
                 if self.intensity[z, n] > it_max:
                     it_max = self.intensity[z, n]
                     z_max = z
@@ -897,7 +1009,8 @@ class SplineBuilder(object):
                 )
                 self.update_fig()
 
-            elif event.key in ['d', 's']:  # disable deplacement mode / change mode
+            elif event.key in ['d', 's']:  # disable deplacement mode / change
+                # mode
                 self.drag = None
                 self.press_key = None
                 self.disp_mode.set_text('Mode : Add point')
@@ -952,7 +1065,26 @@ class SplineBuilder(object):
             self.press_key = None
 
         elif self.press_key == 'g':
-            
+            if not self.guidLine:
+                for i in range(4):
+                    for k in range(7):
+                        self.main_guideLine[i][k].set_data(
+                            [self.r_guide[k], self.r_guide[k]],
+                            [0, self.image.get_height()]
+                        )
+
+            else:
+                for i in range(4):
+                    for k in range(7):
+                        self.main_guideLine[i][k].set_data([], [])
+
+            self.update_fig()
+            self.guidLine = not self.guidLine
+            self.press_key = None
+
+        elif self.press_key == 'f':
+            self._assistant()
+            self.press_key = None
 
         else:
             self.press_key = None
@@ -1024,6 +1156,47 @@ class SplineBuilder(object):
                 self.dp1.figure.canvas.draw()
                 self.selected[0] = True
 
+    def _assistant(self):
+        intensity_r = []
+        plt.figure(figsize=(16, 6))
+
+        color = ea_color.color_met(7)
+
+        for k in range(7):
+            intensity_r.append(
+                ea_math.sliding_mean(
+                    self.image.get_grad()[:, self.r_guide[k]], 3,
+                )
+            )
+
+            front_r = int(self.ref_line[1][self.r_guide[k]])
+
+            intensity_r_crop = intensity_r[k][front_r - 15:front_r + 6]
+
+            ax = plt.subplot(1, 7, k + 1)
+            ax.invert_yaxis()
+
+            plt.plot(intensity_r_crop, range(21), '-', c=color[k])
+            index = peaks.indexes(
+                intensity_r_crop,
+                thres=.3,
+                min_dist=3,
+            )
+
+            plt.plot(
+                [np.min(intensity_r_crop), np.max(intensity_r_crop)],
+                [15, 15],
+                '--', color='tab:red',
+            )
+
+            plt.plot(
+                intensity_r_crop[index], index,
+                ls='None',
+                marker='o', ms=4,
+                c='tab:green',
+            )
+            plt.show()
+
     def add_line(self, x, y):
         """Add a ref line on the plot."""
         for a in self.main_axes:
@@ -1031,6 +1204,27 @@ class SplineBuilder(object):
                 x, y,
                 ls='-.',
                 color='r',
+                alpha=.3
+            )
+
+    def set_ref_line(self, x, y):
+        """Add a ref line on the plot."""
+        # extend the line on the entire width of the figure
+        # ------
+        # we assume that x is sorted
+        xnew = np.arange(self.image.get_width())
+        ynew = np.zeros(self.image.get_width())
+        if len(x) > 0:
+            ynew[x] = y
+            ynew[xnew < x[0]] = y[0]
+            ynew[xnew > x[-1]] = y[-1]
+
+        self.ref_line = [xnew, ynew]
+        for a in self.main_axes:
+            a.plot(
+                xnew, ynew,
+                ls='-.',
+                color='tab:green',
                 alpha=.3
             )
 
@@ -1044,6 +1238,265 @@ class SplineBuilder(object):
                 alpha=.5,
             )
 
+
+class Geometry(object):
+    """
+    Get rc_left, rc_right, zc, and z0/zf on figure.
+
+    Methods
+    -------
+    __call__
+        on call the method plot the line
+
+    """
+
+    def __init__(self, im_init, im_end):
+        """Do the initiation."""
+        # import data
+        # ----------
+        self.image = Image()
+        self.image.set_image(im_init)
+        self.image.set_grad(im_end)
+
+        # init data
+        # ---------
+        self.rl = None
+        self.rc = None
+        self.rr = None
+        self.zf = None
+        self.z0 = None
+        self.zb = None
+
+        # init button and selection
+        # ----------------
+        self.n_line_selected = 0
+
+        # generate main figure
+        # --------------------
+        self.generate_home()
+
+        # connect button/click
+        # --------------------
+        # self.main_fig.canvas.mpl_connect(
+        #     'button_release_event', self.on_press
+        # )
+
+        self.main_fig.canvas.mpl_connect(
+            'key_release_event', self.on_press_key
+        )
+
+    def generate_home(self):
+        """Generate the main ux."""
+        # create figure
+        # -----------
+        self.main_fig = plt.figure(figsize=(16, 9))
+        self.main_fig.canvas.set_window_title('Get the geometry')
+
+        # get width and height
+        # -----------
+        w, h = self.image.get_width(), self.image.get_height()
+
+        # generate color and vectors position
+        # ------------------
+        color = ea_color.color_met(5)
+        self.x = [
+            [int(w/4), int(w/4)],
+            [int(w/2), int(w/2)],
+            [int(3*w/4), int(w/4)],
+            *[[0, w]]*3,
+        ]
+        self.y = [
+            *[[0, h]]*3,
+            [int(h/4), int(h/4)],
+            [int(h/2), int(h/2)],
+            [int(3*h/4), int(h/4)],
+        ]
+
+        # loop to create axes, lines and annotation
+        self.main_ax = []
+        self.main_lines = []
+        self.main_textLine = []
+        for i in range(2):
+            self.main_ax.append(plt.subplot(1, 2, i+1))
+            self.main_ax[i].axis('off')
+
+            # loop over lines
+            self.main_lines.append([])
+            self.main_textLine.append([])
+            for k in range(6):
+                self.main_lines.append(
+                    self.main_ax[i].plot(
+                        self.x[k], self.y[k],
+                        ls='-', lw='.8',
+                        c=color[k],
+                    )[0]
+                )
+                self.main_textLine.append(
+                    self.main_ax[i].annotate(
+                        str(k),
+                        xy=(self.x[k][0], self.y[k][0])
+                    )
+                )
+
+        self.main_ax[0].imshow(
+            self.image.get_image(),
+            cmap='pink'
+        )
+        self.main_ax[1].imshow(
+            self.image.get_grad(),
+            cmap='pink'
+        )
+
+    def update_fig(self):
+        """Update the figure."""
+        for i in range(2):
+            for k in range(6):
+                self.main_lines[i][k].set_data(
+                    self.x[k], self.y[k]
+                )
+                self.main_textLine.set_xy(
+                    self.x[k][0], self.y[k][0]
+                )
+        self.main_fig.canvas.draw()
+
+    def on_press(self, event):
+        """Create line on clicking on the graph.
+
+        Actions
+        -------
+            Press left button to add a point,
+            Middle button to finish the plot,
+            Right to remove the last one.
+
+        """
+        zoom_cond = (
+            self.zc.axes.get_navigate_mode() != 'ZOOM',
+            self.zc2.axes.get_navigate_mode() != 'ZOOM'
+        )
+        if event.inaxes not in [self.zc.axes, self.zc2.axes]:
+            return
+
+        elif event.button == 2:
+            """
+            Clic du milieu pour valider les points et
+            passer à l'image suivante.
+            """
+            plt.close()
+
+        elif event.button == 1 and zoom_cond:
+            """
+            Clic gauche, ajoute un point.
+            Avec ce mode d'ajout, le code va retrier les points dans
+            l'ordre des x croissant.
+            Il ne sont donc pas prient en compte dans l'ordre d'apparition.
+            """
+            x = int(event.xdata)
+            y = int(event.ydata)
+
+            if self.sel == 'z0':
+                self.z0_pos = y
+                self.z0.set_data(
+                    [0, self.w],
+                    [self.z0_pos, self.z0_pos],
+                )
+                self.z02.set_data(
+                    [0, self.w],
+                    [self.z0_pos, self.z0_pos],
+                )
+            elif self.sel == 'zc':
+                self.zc_pos = y
+                self.zc.set_data(
+                    [0, self.w],
+                    [self.zc_pos, self.zc_pos],
+                )
+                self.zc2.set_data(
+                    [0, self.w],
+                    [self.zc_pos, self.zc_pos],
+                )
+            elif self.sel == 'zf':
+                self.zf_pos = y
+                self.zf.set_data(
+                    [0, self.w],
+                    [self.zf_pos, self.zf_pos],
+                )
+                self.zf2.set_data(
+                    [0, self.w],
+                    [self.zf_pos, self.zf_pos],
+                )
+            elif self.sel == 'rc_left':
+                self.rc_left_pos = x
+                self.rc_left.set_data(
+                    [self.rc_left_pos, self.rc_left_pos],
+                    [0, self.h],
+                )
+                self.rc_left2.set_data(
+                    [self.rc_left_pos, self.rc_left_pos],
+                    [0, self.h],
+                )
+            elif self.sel == 'rc_right':
+                self.rc_right_pos = x
+                self.rc_right.set_data(
+                    [self.rc_right_pos, self.rc_right_pos],
+                    [0, self.h],
+                )
+                self.rc_right2.set_data(
+                    [self.rc_right_pos, self.rc_right_pos],
+                    [0, self.h],
+                )
+            elif self.sel == 'rc':
+                self.rc_pos = x
+                self.rc.set_data(
+                    [self.rc_pos, self.rc_pos],
+                    [0, self.h],
+                )
+                self.rc2.set_data(
+                    [self.rc_pos, self.rc_pos],
+                    [0, self.h],
+                )
+
+        # re-draw figure
+        self.zc.figure.canvas.draw()
+
+    def on_press_key(self, event):
+        """Keyboards event."""
+        if event.key in ['0', '1', '2', '3', '4', '5']:
+            # changement de sélection among 0, 1, 2, 3, 4, 5
+            self.n_line_selected = int(event.key)
+
+        new_pos = 10 if 'shift' in event.key else 1
+        if 'up' in event.key or 'left' in event.key:
+            new_pos *= -1
+
+        cond = False
+        for w in event.key.split('-'):
+            if w in ['up', 'down', 'left', 'right']:
+                cond = True
+
+        if cond:
+            if self.n_line_selected < 3:
+                self.x[self.n_line_selected] = [
+                    self.x[self.n_line_selected][0] + new_pos,
+                    self.x[self.n_line_selected][0] + new_pos
+                ]
+            else:
+                self.y[self.n_line_selected] = [
+                    self.y[self.n_line_selected][0] + new_pos,
+                    self.y[self.n_line_selected][0] + new_pos
+                ]
+
+            self.update_fig()
+
+    def get_geom(self):
+        """Return dictionary containing geometrical data."""
+        geom = {
+            'rl': self.rl,
+            'rr': self.rr,
+            'rc': self.rc,
+            'z0': self.z0,
+            'zf': self.zf,
+            'zb': self.zb,
+        }
+        return geom
 
 class SplineBuilder_nonlinear(object):
     """
@@ -1697,7 +2150,6 @@ class ContourLineBuilder(object):
 
             self.ax1.figure.canvas.draw()
 
-
     def deplace_release(self, event):
         """
         Deplace a point.
@@ -1764,6 +2216,7 @@ class ContourLineBuilder(object):
                 )
                 self.dp1.figure.canvas.draw()
                 self.selected[0] = True
+
 
 class SplineBuilderOld(object):
     """
@@ -1990,8 +2443,8 @@ class SplineBuilderOld(object):
                 x_min = x_sort[-2]
                 x_max = x_sort[-1]
             else:
-                x_min = x_sort[(x_sort == x_new)-1]
-                x_max = x_sort[(x_sort == x_new)+1]
+                x_min = x_sort[(x_sort == x_new) - 1]
+                x_max = x_sort[(x_sort == x_new) + 1]
 
             x_sort = self.xs_interp[x_min:x_max]
             for n in range(7):
@@ -2024,7 +2477,7 @@ class SplineBuilderOld(object):
             # look for the closet point from clic
             d = np.inf  # init distance pt from line
             z_out = 0
-            for z in self.z_intensity[y_curs-15:y_curs+15]:
+            for z in self.z_intensity[y_curs - 15:y_curs + 15]:
                 dx = x_curs - self.intensity[z, n]
                 dy = y_curs - z
                 if np.sqrt(dx**2 + dy**2) < d:
@@ -2034,7 +2487,7 @@ class SplineBuilderOld(object):
             # find the local maximum [+- 4px]
             it_max = 0  # init intensity maximum
             z_max = 0  # init z of maximum intensity
-            for z in self.z_intensity[z_out-4:z_out+4]:
+            for z in self.z_intensity[z_out - 4:z_out + 4]:
                 if self.intensity[z, n] > it_max:
                     it_max = self.intensity[z, n]
                     z_max = z
@@ -2062,11 +2515,13 @@ class SplineBuilderOld(object):
         y1, y2 = int(event.ydata), int(event.ydata)
         le = 20  # len of the zoom
 
-        x1 = (x1-le)*(x1 > le)   # = x1-le si x1 > le 0 sinon 0
-        y1 = (y1-le)*(y1 > le)
+        x1 = (x1 - le) * (x1 > le)   # = x1-le si x1 > le 0 sinon 0
+        y1 = (y1 - le) * (y1 > le)
 
-        x2 = (x2+le)*(x2 < np.shape(self.image)[1] - le+1) + np.shape(self.image)[1] * (1 - (x2 < np.shape(self.image)[1] - le+1))
-        y2 = (y2+le)*(y2 < np.shape(self.image)[0] - le+1) + np.shape(self.image)[0] * (1 - (y2 < np.shape(self.image)[0] - le+1))
+        x2 = (x2 + le) * (x2 < np.shape(self.image)[1] - le + 1) + np.shape(
+            self.image)[1] * (1 - (x2 < np.shape(self.image)[1] - le + 1))
+        y2 = (y2 + le) * (y2 < np.shape(self.image)[0] - le + 1) + np.shape(
+            self.image)[0] * (1 - (y2 < np.shape(self.image)[0] - le + 1))
 
         zoom = (
             self.image * (self.sel_ax_zoom == 0) +
@@ -2076,8 +2531,8 @@ class SplineBuilderOld(object):
 
         zoom = zoom[y1:y2, x1:x2]  # crop the image
 
-        xc = int(np.shape(zoom)[1]/2)  #  x_center_zoom
-        yc = int(np.shape(zoom)[0]/2)  #  y_center_zoom
+        xc = int(np.shape(zoom)[1] / 2)  # x_center_zoom
+        yc = int(np.shape(zoom)[0] / 2)  # y_center_zoom
 
         self.cross_x.set_xdata([xc, xc])
         self.cross_y.set_ydata([yc, yc])

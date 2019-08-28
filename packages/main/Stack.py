@@ -527,11 +527,11 @@ class Stack(object):
         A spatio is the juxtaposition of column intensity over time.
         We obtain an image of y over t, not y over x.
         """
-        sp = np.zeros(self.n_image_tot, self.current_image.size[0])
+        sp = np.zeros((self.current_image.get_height(), self.n_image_tot))
         for n in self.range_images:
             im = self.get_image(n)
             it, _ = im.col_intensity(row)
-            sp[n] = it
+            sp[:, n-1] = it
         return sp
 
     def tracker(self, folder_name='front', pts=[], cmp='pink'):
@@ -586,16 +586,35 @@ class Stack(object):
 
         # Ste 1 - Get geometry
         # ------------
-        im_init = self.get_image(time_ref)
-        im_end = self.get_image(time_end)
+        im_init = self.get_image(time_ref).get_image()
+        im_end = self.get_image(time_end).get_image()
         geom = lb.Geometry(im_init, im_end)
         plt.show()
-        
+
         geom = geom.get_geom()
 
         # Step 2 - Double interpolation to detect contour
         # ----------------
-        None
+        range_r = [
+            int(geom['rl'] + 1/3*(geom['rc'] - geom['rl'])),
+            int(geom['rl'] + 2/3*(geom['rc'] - geom['rl'])),
+            int(geom['rc']),
+            int(geom['rc'] + 1/3*(geom['rr'] - geom['rc'])),
+            int(geom['rc'] + 2/3*(geom['rr'] - geom['rc'])),
+        ]
+        sp = {}
+        for r in range(len(range_r)):
+            sp[r] = self.get_spatio_col(range_r[r])
+        data = {
+            't_nuc': time_ref,
+            't_end': time_end,
+            'z0': geom['z0'],
+            'zf': geom['zf']
+        }
+        image = self.get_image(time_ref+10).get_image()
+        spatio = lb.SpatioContourTrack(sp, image, data)
+        contour = spatio.get_contour()  # get the contour over time
+        plt.show()
 
         # Step 3 - Front detection
         # ---------------

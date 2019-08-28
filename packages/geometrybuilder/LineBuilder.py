@@ -17,6 +17,7 @@ import sys
 # math
 import numpy as np
 from scipy import interpolate
+from scipy import optimize
 import peakutils as peaks  # find peaks method
 
 # plot
@@ -294,7 +295,6 @@ class Image:
         self.im = im
         self.width = np.shape(im)[1]
         self.height = np.shape(im)[0]
-        print(self.width, self.height)
 
     def set_grad(self, grad_im):
         """Set the gradient image."""
@@ -1260,16 +1260,11 @@ class Geometry(object):
 
         # init data
         # ---------
-        self.rl = None
-        self.rc = None
-        self.rr = None
-        self.zf = None
-        self.z0 = None
-        self.zb = None
 
         # init button and selection
         # ----------------
         self.n_line_selected = 0
+        self.press_key = None
 
         # generate main figure
         # --------------------
@@ -1277,10 +1272,9 @@ class Geometry(object):
 
         # connect button/click
         # --------------------
-        # self.main_fig.canvas.mpl_connect(
-        #     'button_release_event', self.on_press
-        # )
-
+        self.main_fig.canvas.mpl_connect(
+            'button_release_event', self.on_press
+        )
         self.main_fig.canvas.mpl_connect(
             'key_release_event', self.on_press_key
         )
@@ -1298,24 +1292,27 @@ class Geometry(object):
 
         # generate color and vectors position
         # ------------------
-        color = ea_color.color_met(5)
+        color = ea_color.color_met(6)
         self.x = [
             [int(w/4), int(w/4)],
             [int(w/2), int(w/2)],
-            [int(3*w/4), int(w/4)],
+            [int(3*w/4), int(3*w/4)],
             *[[0, w]]*3,
         ]
         self.y = [
             *[[0, h]]*3,
             [int(h/4), int(h/4)],
             [int(h/2), int(h/2)],
-            [int(3*h/4), int(h/4)],
+            [int(3*h/4), int(3*h/4)],
         ]
 
         # loop to create axes, lines and annotation
         self.main_ax = []
         self.main_lines = []
         self.main_textLine = []
+        self.main_intersec_dots = []
+        self.main_quadratic_line = []
+        self.main_circle_line = []
         for i in range(2):
             self.main_ax.append(plt.subplot(1, 2, i+1))
             self.main_ax[i].axis('off')
@@ -1324,20 +1321,57 @@ class Geometry(object):
             self.main_lines.append([])
             self.main_textLine.append([])
             for k in range(6):
-                self.main_lines.append(
+                self.main_lines[i].append(
                     self.main_ax[i].plot(
                         self.x[k], self.y[k],
-                        ls='-', lw='.8',
+                        ls='-', lw='1.2',
                         c=color[k],
                     )[0]
                 )
-                self.main_textLine.append(
+                self.main_textLine[i].append(
                     self.main_ax[i].annotate(
                         str(k),
-                        xy=(self.x[k][0], self.y[k][0])
+                        xy=(self.x[k][0], self.y[k][0]),
+                        fontsize=12, color=color[k],
+                        backgroundcolor='k', fontweight='bold',
+                        va='bottom', ha='right',
                     )
                 )
 
+            # intersection dots
+            self.main_intersec_dots.append([])
+            x = [
+                self.x[1][0],  # rc
+                self.x[0][0],  # rl
+                self.x[2][0],  # rr
+                self.x[1][0],  # rc
+            ]
+            y = [
+                self.y[4][0],  # z0
+                self.y[5][0],  # zb
+                self.y[5][0],  # zb
+                self.y[3][0],  # zf
+            ]
+            for k in range(4):
+                self.main_intersec_dots[i].append(
+                    self.main_ax[i].plot(
+                        x[k], y[k],
+                        ls='None', marker='o',
+                        mfc='tab:red', mec='tab:red',
+                        ms=4,
+                    )[0]
+                )
+
+            # init circle plots
+            self.main_quadratic_line.append(
+                self.main_ax[i].plot([], [], ls='-.', color='tab:blue')[0]
+            )
+            self.main_circle_line.append(
+                self.main_ax[i].plot([], [], ls='-.', color='tab:green')[0]
+            )
+
+        # display images
+        # --------------
         self.main_ax[0].imshow(
             self.image.get_image(),
             cmap='pink'
@@ -1347,16 +1381,93 @@ class Geometry(object):
             cmap='pink'
         )
 
+    def get_quadratic_interpolation(self):
+        """Return the quadratic approximation of the drop."""
+        x = [
+            self.x[1][0],  # rc
+            self.x[0][0],  # rl
+            self.x[2][0],  # rr
+        ]
+        y = [
+            self.y[4][0],  # z0
+            self.y[5][0],  # zb
+            self.y[5][0],  # zb
+        ]
+        y = np.poly1d(np.polyfit(x, y, 2))
+        x = np.arange(self.x[0][0], self.x[2][0])
+        y = y(x)
+        return x, y
+
+    def get_circle_interpolation(self):
+        """Return the circle interpolation."""
+        # Get x, yValues
+        # --------------
+        x = [
+            self.x[1][0],  # rc
+            self.x[0][0],  # rl
+            self.x[2][0],  # rr
+        ]
+        y = [
+            self.y[4][0],  # z0
+            self.y[5][0],  # zb
+            self.y[5][0],  # zb
+        ]
+        x = np.array(x)
+        y = np.array(y)
+
+        center_estimation = [np.mean(x), np.mean(y)]
+
+        def calc_radius(xc, yc):
+            """Calculate the radius of circle."""
+            return np.sqrt((x-xc)**2 + (y-yc)**2)
+
+        def minimize(c):
+            """Minimize the residual radius."""
+            R = calc_radius(*c)
+            return R - R.mean()
+
+        center, ier = optimize.leastsq(minimize, center_estimation)
+        xc, yc = center
+        R = np.mean(calc_radius(xc, yc))
+
+        x = np.arange(np.min(x), np.max(x))
+        y = yc + np.sqrt(R**2 - (x - xc)**2)
+        y = (yc - np.sqrt(R**2 - (x - xc)**2))
+        return x, y
+
     def update_fig(self):
         """Update the figure."""
         for i in range(2):
+            # loop update main_lines
             for k in range(6):
                 self.main_lines[i][k].set_data(
                     self.x[k], self.y[k]
                 )
-                self.main_textLine.set_xy(
-                    self.x[k][0], self.y[k][0]
+                self.main_textLine[i][k].set_position(
+                    (self.x[k][0], self.y[k][0])
                 )
+
+            # loop for dots
+            x = [
+                self.x[1][0],  # rc
+                self.x[0][0],  # rl
+                self.x[2][0],  # rr
+                self.x[1][0],  # rc
+            ]
+            y = [
+                self.y[4][0],  # z0
+                self.y[5][0],  # zb
+                self.y[5][0],  # zb
+                self.y[3][0],  # zf
+            ]
+            for k in range(4):
+                self.main_intersec_dots[i][k].set_data(x[k], y[k])
+
+            # update fit
+            x, y = self.get_quadratic_interpolation()
+            self.main_quadratic_line[i].set_data(x, y)
+            x, y = self.get_circle_interpolation()
+            self.main_circle_line[i].set_data(x, y)
         self.main_fig.canvas.draw()
 
     def on_press(self, event):
@@ -1369,11 +1480,7 @@ class Geometry(object):
             Right to remove the last one.
 
         """
-        zoom_cond = (
-            self.zc.axes.get_navigate_mode() != 'ZOOM',
-            self.zc2.axes.get_navigate_mode() != 'ZOOM'
-        )
-        if event.inaxes not in [self.zc.axes, self.zc2.axes]:
+        if event.inaxes not in self.main_ax:
             return
 
         elif event.button == 2:
@@ -1383,7 +1490,7 @@ class Geometry(object):
             """
             plt.close()
 
-        elif event.button == 1 and zoom_cond:
+        elif event.button == 1:
             """
             Clic gauche, ajoute un point.
             Avec ce mode d'ajout, le code va retrier les points dans
@@ -1393,69 +1500,12 @@ class Geometry(object):
             x = int(event.xdata)
             y = int(event.ydata)
 
-            if self.sel == 'z0':
-                self.z0_pos = y
-                self.z0.set_data(
-                    [0, self.w],
-                    [self.z0_pos, self.z0_pos],
-                )
-                self.z02.set_data(
-                    [0, self.w],
-                    [self.z0_pos, self.z0_pos],
-                )
-            elif self.sel == 'zc':
-                self.zc_pos = y
-                self.zc.set_data(
-                    [0, self.w],
-                    [self.zc_pos, self.zc_pos],
-                )
-                self.zc2.set_data(
-                    [0, self.w],
-                    [self.zc_pos, self.zc_pos],
-                )
-            elif self.sel == 'zf':
-                self.zf_pos = y
-                self.zf.set_data(
-                    [0, self.w],
-                    [self.zf_pos, self.zf_pos],
-                )
-                self.zf2.set_data(
-                    [0, self.w],
-                    [self.zf_pos, self.zf_pos],
-                )
-            elif self.sel == 'rc_left':
-                self.rc_left_pos = x
-                self.rc_left.set_data(
-                    [self.rc_left_pos, self.rc_left_pos],
-                    [0, self.h],
-                )
-                self.rc_left2.set_data(
-                    [self.rc_left_pos, self.rc_left_pos],
-                    [0, self.h],
-                )
-            elif self.sel == 'rc_right':
-                self.rc_right_pos = x
-                self.rc_right.set_data(
-                    [self.rc_right_pos, self.rc_right_pos],
-                    [0, self.h],
-                )
-                self.rc_right2.set_data(
-                    [self.rc_right_pos, self.rc_right_pos],
-                    [0, self.h],
-                )
-            elif self.sel == 'rc':
-                self.rc_pos = x
-                self.rc.set_data(
-                    [self.rc_pos, self.rc_pos],
-                    [0, self.h],
-                )
-                self.rc2.set_data(
-                    [self.rc_pos, self.rc_pos],
-                    [0, self.h],
-                )
+            if self.n_line_selected < 3:
+                self.x[self.n_line_selected] = [x, x]
+            else:
+                self.y[self.n_line_selected] = [y, y]
 
-        # re-draw figure
-        self.zc.figure.canvas.draw()
+            self.update_fig()
 
     def on_press_key(self, event):
         """Keyboards event."""
@@ -1468,7 +1518,7 @@ class Geometry(object):
             new_pos *= -1
 
         cond = False
-        for w in event.key.split('-'):
+        for w in event.key.split('+'):
             if w in ['up', 'down', 'left', 'right']:
                 cond = True
 
@@ -1489,14 +1539,80 @@ class Geometry(object):
     def get_geom(self):
         """Return dictionary containing geometrical data."""
         geom = {
-            'rl': self.rl,
-            'rr': self.rr,
-            'rc': self.rc,
-            'z0': self.z0,
-            'zf': self.zf,
-            'zb': self.zb,
+            'rl': self.x[0][0],
+            'rr': self.x[2][0],
+            'rc': self.x[1][0],
+            'z0': self.y[3][0],
+            'zf': self.y[4][0],
+            'zb': self.y[5][0],
         }
         return geom
+
+
+class SpatioContourTrack(object):
+    """Track the contour thanks to spatio."""
+
+    def __init__(self, spatio, image, data):
+        """Init the class."""
+        # store data
+        # ---------
+        self.spatio = spatio
+        self.image = Image()
+        self.image.set_image(image)
+        self.t_nuc = data['t_nuc']
+        self.t_end = data['t_end']
+        self.z0 = data['z0']
+        self.zf = data['zf']
+
+        # Generate main figure
+        # --------------
+        self.generate_home()
+
+    def generate_home(self):
+        """Define the main figure."""
+        # declare main figure
+        # ------------
+        self.main_fig = plt.figure(figsize=(16, 9))
+        self.main_fig.canvas.set_window_title(
+            'Contour detection thanks to spatio'
+        )
+
+        # Declare axes
+        # ------------
+        txt = [
+            r'$\frac{r}{r_0} = -\frac{2}{3}$',
+            r'$\frac{r}{r_0} = -\frac{1}{3}$',
+            r'$\frac{r}{r_0} = 1$',
+            r'$\frac{r}{r_0} = \frac{1}{3}$',
+            r'$\frac{r}{r_0} = \frac{2}{3}$',
+            'Original Image',
+        ]
+        self.main_ax = []
+        for i in range(6):
+            self.main_ax.append(plt.subplot(2, 3, i+1))
+            self.main_ax[i].set_title(txt[i])
+
+        # show spatio and image
+        # --------------
+        for i in range(5):
+            self.main_ax[i].imshow(
+                self.spatio[i], cmap='pink'
+            )
+        self.main_ax[5].imshow(self.image.get_image(), cmap='pink')
+
+        # guidelines
+        # ----------
+        t = [self.t_nuc, self.t_end]
+        for i in range(5):
+            for k in range(2):
+                self.main_ax[i].plot(
+                    [t[k], t[k]], [0, self.image.get_height()-1],
+                    ls='-.', marker='None',
+                    color='tab:green', alpha=1
+                )
+
+    def get_contour(self):
+        return None
 
 class SplineBuilder_nonlinear(object):
     """

@@ -98,59 +98,18 @@ class ImageProcessing():
         :param ymin: minimal y coordinate
         :param ymax: maximal y coordinate
         """
-        if xmin < 0:
-            print('xmin might be at least 0 - 0 will be used')
-            xmin = 0
-        if ymin < 0:
-            print('ymin might be at least 0 - 0 will be used')
-            ymin = 0
-        if xmax > self.size[1]:
-            print(
-                'xmax might be less than', str(self.size[1]),
-                '- this value will be used'
-            )
-            xmax = self.size[1]
-        if ymax > self.size[0]:
-            print(
-                'ymax might be less than', str(self.size[0]),
-                '- this value will be used'
-            )
-            ymax = self.size[0]
-        self.image = self.image[
-                ymin:ymax,
-                xmin:xmax
-            ]
+        self.image = self.get_crop(xmin, xmax, ymin, ymax)
+        self.width = self.image.shape[1]
+        self.height = self.image.shape[0]
         self.size = self.image.shape
 
     def get_crop(self, xmin, xmax, ymin, ymax):
-        """
-        Permits to crop the image thanks to coordinate.
-
-        input:
-            xmin: int
-                mininaml x coordinate
-            xmax: int
-                maximal x coordinate
-            ymin: int
-                minimal y coordinate
-            ymax: int
-                maximal y coordinate
-        """
-        if xmin < 0:
-            xmin = 0
-        if ymin < 0:
-            ymin = 0
-        if xmax > self.size[1]:
-            xmax = self.size[1]
-        if ymax > self.size[0]:
-            ymax = self.size[0]
-
-        image = self.image[
-                ymin:ymax,
-                xmin:xmax
-            ]
-
-        return image
+        """Return image crop."""
+        xmin = 0 if xmin < 0 else xmin
+        ymin = 0 if ymin < 0 else ymin
+        xmax = self.width if xmax > self.width else xmax
+        ymax = self.height if ymax > self.height else ymax
+        return self.image[ymin:ymax, xmin:xmax]
 
     def row_intensity(self, row, N=7):
         """
@@ -293,6 +252,77 @@ class ImageProcessing():
         else:
             gy = signal.convolve2d(im, grady, border)
             gx = signal.convolve2d(im, gradx, border)
+
+        if out == 'x':
+            return gx
+        if out == 'y':
+            return gy
+        if out == 'mag':
+            gmag = np.sqrt(gy**2 + gx**2)
+            return gmag
+        if out == 'arg':
+            garg = np.arctan2(gy, gx)
+            return garg
+
+    def get_gradient(self, size=3, type='sobel', out='mag', border='valid'):
+        """Return the gradient of the image."""
+        if type == 'sobel':
+            if size == 3:
+                grady = np.array([
+                    [-1, -2, -1],
+                    [0, 0, 0],
+                    [1, 2, 1]
+                ]) / 8
+                gradx = np.array([
+                    [-1, 0, 1],
+                    [-2, 0, 2],
+                    [-1, 0, 1]
+                ]) / 8
+            elif size == 5:
+                grady = np.array([
+                    [-5, -8, -10, -8, -5],
+                    [-4, -10, -20, -10, -4],
+                    [0, 0, 0, 0, 0],
+                    [4, 10, 20, 10, 4],
+                    [5, 8, 10, 8, 5]
+                ]) / 240
+                gradx = np.array([
+                    [-5, -4, 0, 4, 5],
+                    [-8, -10, 0, 10, 8],
+                    [-10, -20, 0, 20, 10],
+                    [-8, -10, 0, 10, 8],
+                    [-5, -4, 0, 4, 5]
+                ]) / 240
+        elif type == 'scharr':
+            if size == 3:
+                grady = np.array([
+                    [-3, -10, -3],
+                    [0, 0, 0],
+                    [3, 10, 3]
+                ]) / 32
+                gradx = np.array([
+                    [-3, 0, 3],
+                    [-10, 0, 10],
+                    [-3, 0, 3]
+                ]) / 32
+            elif size == 5:
+                grady = np.array([
+                    [-1, -2, -3, -2, -1],
+                    [-1, -2, -6, -2, -1],
+                    [0, 0, 0, 0, 0],
+                    [1, 2, 6, 2, 1],
+                    [1, 2, 3, 2, 1],
+                ]) / 60
+                gradx = np.array([
+                    [-1, -1, 0, 1, 1],
+                    [-2, -2, 0, 2, 2],
+                    [-3, -6, 0, 6, 3],
+                    [-2, -2, 0, 2, 2],
+                    [-1, -1, 0, 1, 1]
+                ]) / 60
+
+        gy = signal.convolve2d(self.image, grady, border)
+        gx = signal.convolve2d(self.image, gradx, border)
 
         if out == 'x':
             return gx

@@ -353,8 +353,8 @@ class ImageProcessing():
 
 
 if __name__ == '__main__':
-    from skimage.filters.rank import entropy
-    from skimage.morphology import disk
+    # from skimage.filters.rank import entropy
+    # from skimage.morphology import disk
     path = \
         '/Users/eablonet/Documents/0_phd/2_results/export_image/rep1/rep1n06/\
 lastOp/i_0010.npy'

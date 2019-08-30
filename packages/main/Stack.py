@@ -589,7 +589,7 @@ class Stack(object):
         # ------------
         im_init = self.get_image(time_ref).get_image()
         im_end = self.get_image(time_end).get_image()
-        geom = lb.Geometry(im_init, im_end)
+        geom = lb.Geometry(im_init, im_end, px_mm=self.datas.iloc[0]['px_mm'])
         plt.show()
 
         geom = geom.get_geom()
@@ -609,10 +609,13 @@ class Stack(object):
         data = {
             't_nuc': time_ref,
             't_end': time_end,
-            'z0': geom['z0'],
-            'zf': geom['zf']
+            'geom': geom,
+            'range_r': range_r
         }
-        image = self.get_image(time_ref+10).get_image()
+        image = {}
+        image[0] = self.get_image(time_ref).get_image()
+        image[1] = self.get_image(int((time_ref+time_end)/2)).get_image()
+        image[2] = self.get_image(time_end).get_image()
         spatio = lb.SpatioContourTrack(sp, image, data)
         contour = spatio.get_contour()  # get the contour over time
         plt.show()

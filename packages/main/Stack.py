@@ -617,11 +617,40 @@ class Stack(object):
         image[1] = self.get_image(int((time_ref+time_end)/2)).get_image()
         image[2] = self.get_image(time_end).get_image()
         spatio = lb.SpatioContourTrack(sp, image, data)
-        contour = spatio.get_contour()  # get the contour over time
         plt.show()
+        contour = spatio.get_contour()  # get the contour over time
 
         # Step 3 - Front detection
         # ---------------
+        frontTracker = lb.SpatioFrontTrack(sp, image, data, contour)
+        plt.show()
+        front = frontTracker.get_front()
+
+        if not os.path.isfile(self.data_directory + 'front_x.npy'):
+            # save front (xfront, yfront)
+            np.save(
+                self.data_directory + folder_name + '/front',
+                front
+            )
+            # save contour (cx_left, cy_left, cx_right, cy_right)
+            np.save(
+                self.data_directory + folder_name + '/contour',
+                contour
+            )
+            # save rc, rl, rr, zb, z0, zf
+            np.save(
+                self.data_directory + folder_name + '/geom',
+                geom
+            )
+
+
+
+
+
+
+
+        # old Version
+        # ----------
         x, y = [], []  # points locations
         x_interp, y_interp = [], []  # interpolate line
         for n in range(time_ref, time_end):

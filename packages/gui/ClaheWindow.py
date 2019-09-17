@@ -7,6 +7,10 @@ Authors
 eablonet
 
 """
+import sys
+
+from matplotlib import pyplot as plt
+
 from matplotlib.backends.qt_compat import QtCore, QtWidgets
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvas, NavigationToolbar2QT as NavigationToolbar
@@ -115,7 +119,7 @@ class ClaheWindow(QtWidgets.QMainWindow):
         """Update values."""
         size = self.slider_size.value()
         limit = self.slider_limit.value()/10
-        im = self.image.equalize_hist_by_clahe(limit, size, output=True)
+        im = self.image.get_equalize_by_clahe(limit, size)
         self.imshow.set_data(im)
         self.imshow.set_clim(vmin=0, vmax=1)
         self.imshow.figure.canvas.draw()

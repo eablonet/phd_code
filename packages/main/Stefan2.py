@@ -159,24 +159,22 @@ class Ste_1d_1c_1p_qs(object):
         # init physical paramaters
         # ------------------------
         self.rho = {'solid': None}
-        self.k = None
-        self.cp = None
-        self.alpha = None
-        self.Lf = None
+        self.k = {'solid': None}
+        self.cp = {'solid': None}
+        self.alpha = {'solid': None}
+        self.Lf = {'solid': None}
 
         # init dilatation parameters
         # --------------------------
         self.dilatation = dilatation
-        if dilatation:
-            self.rho['liquid'] = None
 
         # init thermal paramaters
         # -----------------------
         self.Tw = None  # wall temperature
         self.Tm = None  # melting temperature
-        self.T = None  # temperature vector in ice
+        self.T = None  # temperature vector in domain
 
-        # init time
+        # init time vector
         # ---------
         self.time = None
 
@@ -190,8 +188,6 @@ class Ste_1d_1c_1p_qs(object):
         # ------------------
         self.zi = None  # ice height
         self.zl = None  # liquid height  # ndrl z_tot = zl+zi
-        self.Ste = None  # stefan number
-        self.delta = None  # delta value
         self.tz0 = None  # time to reach z0
         self.tf = None  # time to freeze all the liquid, ...
         # equal to tz0 without dilatation
@@ -202,26 +198,17 @@ class Ste_1d_1c_1p_qs(object):
             'One dimensional steady monophasic solution of Stefan Problem.'
         )
 
-    def set_dilatation(self, val):
-        """Enable/disable dilatation.
-
-        inputs
-        ------
-            val : bool
-                True or False. Default is False.
-        """
-        self.dilatation = val
-
     def set_material(self, material='Water'):
         """Import the material properties."""
         mat = {'Water': ma.Water(), }
         mat = mat[material]
+        mat.set_phase('solid')
         mat.set_temperature(mat.Tm)
 
         self.rho['solid'] = mat.get_rho()
-        self.k = mat.get_k()
-        self.cp = mat.get_cp()
-        self.alpha = mat.get_alpha()
+        self.k['solid'] = mat.get_k()
+        self.cp['solid'] = mat.get_cp()
+        self.alpha['solid'] = mat.get_alpha()
 
         self.Lf = mat.get_Lf()
         self.Tm = mat.get_Tm()
@@ -230,7 +217,7 @@ class Ste_1d_1c_1p_qs(object):
             mat.set_phase('liquid')
             self.rho['liquid'] = mat.get_rho()
 
-    def set_geometry(self, z0, zmax=None, Nz=100):
+    def set_geometry(self, z0, Nz=100, zmax=None,):
         """Import geometry info, create geometry vector.
 
         inputs
@@ -244,6 +231,7 @@ class Ste_1d_1c_1p_qs(object):
 
         """
         self.z0 = z0
+
         if self.dilatation:
             if self.rho['liquid'] is not None:
                 self.zf = self.rho['liquid']/self.rho['solid']*z0
@@ -337,8 +325,6 @@ class Ste_1d_1c_1p_qs(object):
         self.tf = self.zf**2*self.Lf / (
             2*self.alpha*self.cp*(self.Tm - self.Tw)
         )
-        self.Ste = self.cp * (self.Tm - self.Tw) / self.Lf
-        self.delta = sqrt(self.Ste/2)
 
         # calculate T for each time
         # -------------------------
@@ -351,11 +337,11 @@ class Ste_1d_1c_1p_qs(object):
 
     def get_Ste(self):
         """Return Stefan value."""
-        return self.Ste
+        return self.cp * (self.Tm - self.Tw) / self.Lf
 
     def get_delta(self):
         """Return delta value."""
-        return self.delta
+        return sqrt(self.get_Ste()/2)
 
     def get_tz0(self):
         """Return time to freeze z0 value."""
@@ -459,10 +445,10 @@ class Ste_1d_1c_1p_qs(object):
         cbar = fig.colorbar(cs)
         cbar.ax.set_ylabel('Temperature', rotation=270)
 
-
         ax.set_xlabel('temps (s)')
         ax.set_ylabel('z (mm)')
         plt.show()
+
 
 class Ste_1d_1c_1p_is(Ste_1d_1c_1p_qs):
     """Solve Stefan instationny, only in solid phase.
@@ -520,6 +506,12 @@ class Ste_1d_1c_1p_is(Ste_1d_1c_1p_qs):
 
         self.time = linspace(0, tmax, Nt)
 
+    def get_delta(self):
+        """Return delta value."""
+        def delta_method(delta):
+            return delta*exp(delta**2)*erf(delta) - self.get_Ste()/sqrt(pi)
+        return op.fsolve(delta_method, .1)[0]
+
     def solve(self):
         """Solve front position, and time field.
 
@@ -535,16 +527,9 @@ class Ste_1d_1c_1p_is(Ste_1d_1c_1p_qs):
         # ------------------------------
         self.T = self.Tm*ones([len(self.z), len(self.time)])
 
-        # calc tz0, Stefan and delta
-        # --------------------------
-        self.Ste = self.cp * (self.Tm - self.Tw) / self.Lf
-
-        # calculate delta
-        # ---------------
-        def delta_method(delta):
-            return delta*exp(delta**2)*erf(delta) - self.Ste/sqrt(pi)
-        self.delta = op.fsolve(delta_method, .1)[0]
-        # .1 because we expect a small delta
+        # get delta_value
+        # ---------
+        delta = self.get_delta()
 
         # calc tz0
         # --------
@@ -556,7 +541,7 @@ class Ste_1d_1c_1p_is(Ste_1d_1c_1p_qs):
 
         # zi solution
         # -----------
-        zi = 2 * self.delta*sqrt(self.alpha*self.time)
+        zi = 2 * delta*sqrt(self.alpha*self.time)
         self.zi = zi*(zi < zf) + zf*(zi >= zf)
 
         # zl calcul
@@ -713,6 +698,33 @@ class Ste_1d_1c_2p_qsis(Ste_1d_1c_1p_qs):
 
         self.time = linspace(0, tmax, Nt)
 
+    def get_Ste(self):
+        """Return Stefan number value."""
+        return self.cp['solid'] * (self.Tm - self.Tw)/self.Lf
+
+    def get_Ste_liquid(self):
+        """Return Liquid Stefan number value."""
+        return self.cp['liquid'] * (self.Tinf - self.Tm)/self.Lf
+
+    def get_delta(self):
+        """Return delta parameter."""
+        def delta_method(delta):
+            f = delta**2*erfc(
+                    delta*sqrt(self.alpha['solid']/self.alpha['liquid'])
+                ) - \
+                self.get_Ste()/2 * erfc(
+                    delta*sqrt(self.alpha['solid']/self.alpha['liquid'])
+                ) + \
+                delta*self.rho['liquid'] / self.rho['solid'] * \
+                sqrt(self.alpha['liquid'] / self.alpha['solid']) * \
+                self.get_Ste_liquid() / sqrt(pi) * \
+                exp(
+                    -delta**2*self.alpha['solid']/self.alpha['liquid']
+                )
+
+            return f
+        return op.fsolve(delta_method, .1)[0]
+
     def solve(self):
         """Solve front position, and time field.
 
@@ -738,22 +750,7 @@ class Ste_1d_1c_2p_qsis(Ste_1d_1c_1p_qs):
 
         # calculate delta
         # ---------------
-        def delta_method(delta):
-            f = delta**2*erfc(
-                    delta*sqrt(self.alpha['solid']/self.alpha['liquid'])
-                ) - \
-                self.Ste['solid']/2 * erfc(
-                    delta*sqrt(self.alpha['solid']/self.alpha['liquid'])
-                ) + \
-                delta*self.rho['liquid'] / self.rho['solid'] * \
-                sqrt(self.alpha['liquid'] / self.alpha['solid']) * \
-                self.Ste['liquid'] / sqrt(pi) * \
-                exp(
-                    -delta**2*self.alpha['solid']/self.alpha['liquid']
-                )
-
-            return f
-        self.delta = op.fsolve(delta_method, .1)[0]
+        delta = self.get_delta()
         # .1 because we expect a small delta
 
         # calc tz0
@@ -766,7 +763,7 @@ class Ste_1d_1c_2p_qsis(Ste_1d_1c_1p_qs):
 
         # zi solution
         # -----------
-        zi = 2 * self.delta*sqrt(self.alpha['solid']*self.time)
+        zi = 2 * delta*sqrt(self.alpha['solid']*self.time)
         self.zi = zi*(zi < zf) + zf*(zi >= zf)
 
         # zl calcul
@@ -880,6 +877,20 @@ class Ste_1d_1c_2p_isis(Ste_1d_1c_2p_qsis):
 
         self.time = linspace(0, tmax, Nt)
 
+    def get_delta(self):
+        """Return delta parameter."""
+        def delta_method(delta):
+            f = delta*erf(delta)*exp(delta**2) - \
+                self.get_Ste()/sqrt(pi) + \
+                self.rho['liquid'] / self.rho['solid'] * \
+                sqrt(self.alpha['liquid'] / self.alpha['solid']) * \
+                self.get_Ste_liquid()/sqrt(pi) * \
+                exp(delta**2*(1-self.alpha['solid']/self.alpha['liquid'])) / \
+                erfc(delta*sqrt(self.alpha['solid']/self.alpha['liquid'])) * \
+                erf(delta)
+            return f
+        return op.fsolve(delta_method, .1)[0]
+
     def solve(self):
         """Solve front position, and time field.
 
@@ -905,30 +916,20 @@ class Ste_1d_1c_2p_isis(Ste_1d_1c_2p_qsis):
 
         # calculate delta
         # ---------------
-        def delta_method(delta):
-            f = delta*erf(delta)*exp(delta**2) - \
-                self.Ste['solid']/sqrt(pi) + \
-                self.rho['liquid'] / self.rho['solid'] * \
-                sqrt(self.alpha['liquid'] / self.alpha['solid']) * \
-                self.Ste['liquid']/sqrt(pi) * \
-                exp(delta**2*(1-self.alpha['solid']/self.alpha['liquid'])) / \
-                erfc(delta*sqrt(self.alpha['solid']/self.alpha['liquid'])) * \
-                erf(delta)
-            return f
-        self.delta = op.fsolve(delta_method, .1)[0]
+        delta = self.get_delta()
         # .1 because we expect a small delta
 
         # calc tz0
         # --------
-        self.tz0 = self.z0**2 / (4*self.delta**2*self.alpha['solid'])
+        self.tz0 = self.z0**2 / (4*delta**2*self.alpha['solid'])
 
         # calc tf
         # --------
-        self.tf = self.zf**2 / (4*self.delta**2*self.alpha['solid'])
+        self.tf = self.zf**2 / (4*delta**2*self.alpha['solid'])
 
         # zi solution
         # -----------
-        zi = 2 * self.delta*sqrt(self.alpha['solid']*self.time)
+        zi = 2 * delta*sqrt(self.alpha['solid']*self.time)
         self.zi = zi*(zi < zf) + zf*(zi >= zf)
 
         # zl calcul
@@ -1671,5 +1672,62 @@ if __name__ == '__main__':
     plt.figure()
     plt.plot(time, Tint, '-.k')
     plt.grid(True)
+
+    Temps = [-1, -3, -5, -7, -10, -12, -15, -20]
+    delta1 = []
+    delta0 = []
+    delta2 = []
+    Ste = []
+    for T in Temps:
+        ste = Ste_1d_1c_1p_is(dilatation=False)
+        ste.set_material()
+        ste.set_geometry(z0=1e-3, zmax=3e-3, Nz=200)
+        ste.set_thermic(T=T)
+        ste.set_time(tmax=10, Nt=1000)
+        delta1.append(ste.get_delta())
+        Ste.append(ste.get_Ste())
+
+        ste = Ste_1d_1c_1p_qs(dilatation=False)
+        ste.set_material()
+        ste.set_geometry(z0=1e-3, zmax=3e-3, Nz=200)
+        ste.set_thermic(T=T)
+        ste.set_time(tmax=10, Nt=1000)
+        delta0.append(ste.get_delta())
+
+        ste = Ste_1d_1c_2p_isis(dilatation=False)
+        ste.set_material()
+        ste.set_geometry(z0=1e-3, zmax=3e-3, Nz=200)
+        ste.set_thermic(T=[T, 20])
+        ste.set_time(tmax=10, Nt=1000)
+        delta2.append(ste.get_delta())
+
+    fig = plt.figure(figsize=[9, 4.5])
+    fig.canvas.set_window_title('Delta vs Ste')
+    ax1 = fig.add_subplot(111)
+    ax2 = ax1.twiny()
+    # ax3 = ax2.twinx()
+
+    ax1.plot(Ste, delta0, '-.^', color='tab:blue', lw='2', ms='8', mfc='none', label='Quasi statique', zorder=1)
+    ax1.plot(Ste, delta1, '-.^', color='tab:red', lw='2', ms='8', mfc='none', label='Instationaire', zorder=2)
+    ax1.plot(Ste, delta2, '-.^', color='tab:green', lw='2', ms='8', mfc='none', label='Liquide et solide', zorder=2)
+    ax1.set_xlabel(r'$S_{te}$ [1]', size=14)
+    ax1.set_ylabel(r'$\delta$ [1]', size=14)
+
+    ax2.set_xticks(Ste)
+    ax2.set_xticklabels(Temps)
+    ax2.xaxis.set_ticks_position('bottom') # set the position of the second x-axis to bottom
+    ax2.xaxis.set_label_position('bottom') # set the position of the second x-axis to bottom
+    ax2.spines['bottom'].set_position(('outward', 36))
+    ax2.set_xlim(ax1.get_xlim())
+    ax2.set_xlabel('Temperature du substrat (°C)', size=14)
+    # err = [abs(delta0[i] - delta1[i])/delta1[i]*100 for i in range(len(Temps))]
+    # ax3.plot(Ste, err, '-', color='k', marker='None', zorder=0)
+    # ax3.set_ylabel('Erreur relative (%)', fontsize=14)
+
+    plt.title(r"Evolution de $\delta$ en fonction du nombre de Stefan", size=14)
+    ax1.grid(True)
+    ax1.legend(fancybox=True, shadow=True, fontsize=14)
+
+    print(delta0[-1], delta1[-1])
 
     plt.show()

@@ -34,8 +34,10 @@ Stack
 import sys
 import os
 import glob
+import collections
 
 import numpy as np
+from scipy import optimize
 
 import progressbar
 
@@ -54,11 +56,9 @@ from scipy import ndimage
 
 import peakutils as peaks
 
-import pandas as ps
-
 # local packages
 # --------------
-from . import Image as ip
+from . import Image
 from . import read_online_data as rd
 
 from ..geometrybuilder import LineBuilder as lb
@@ -74,8 +74,9 @@ from ..gui import ClaheWindow as cw
 # code
 # ----
 # usefull mehtods
-def log(x):
-    print(x, file=sys.stderr)
+def log(*x):
+    """Own print."""
+    print(*x, file=sys.stderr)
 
 
 class Geometry:
@@ -83,50 +84,414 @@ class Geometry:
 
     def __init__(self):
         """Init the class."""
+        # r -axis data
+        # ------
         self.r0 = None
-        self.z0 = None
-        self.zf = None
+        self.rr = None
+        self.rl = None
         self.rc = None
 
-    def set_r0(self, r0):
-        """Set the foot drop radius."""
-        self.r0 = r0
+        # z-axis data
+        # ------
+        self.z0 = None
+        self.zf = None
+        self.zb = None
 
-    def set_rc(self, rc):
-        """Set the radius of the drop center."""
-        self.rc = rc
+    def isEmpty(self):
+        """Return True if geometry has been loaded.
 
-    def set_z0(self, z0):
-            """Set the initiale height of the drop."""
-            self.z0 = z0
+        This mean that rr, rl zb or zf are not None.
+        """
+        if self.zf is None:
+            return True
+        else:
+            return False
 
-    def set_zf(self, zf):
-        """Set the initile height of the drop."""
-        self.zf = zf
+    def _get_circle_interpolation(self):
+        """Return the circle interpolation."""
+        # Get x, yValues
+        # --------------
+        x = [
+            self.rc,  # rc
+            self.rl,  # rl
+            self.rr,  # rr
+        ]
+        y = [
+            self.z0,  # z0
+            self.zb,  # zb
+            self.zb  # zb
+        ]
 
-    def get_r0(self):
-        """Return the foot drop radius."""
-        return self.r0
+        for i in x+y:
+            if i is None:
+                raise ValueError(
+                    'At least one value is missing among :\n' +
+                    'rc, rl, rr, z0, zb'
+                )
 
-    def get_rc(self):
-        """Return the radius of the drop center."""
-        return self.rc
+        x = np.array(x)
+        y = np.array(y)
 
-    def get_z0(self):
-        """Set the initiale height of the drop."""
-        return self.z0
+        center_estimation = [np.mean(x), np.mean(y)]
 
-    def get_zf(self):
-        """Set the initile height of the drop."""
-        return self.zf
+        def calc_radius(xc, yc):
+            """Calculate the radius of circle."""
+            return np.sqrt((x-xc)**2 + (y-yc)**2)
+
+        def minimize(c):
+            """Minimize the residual radius."""
+            R = calc_radius(*c)
+            return R - R.mean()
+
+        center, ier = optimize.leastsq(minimize, center_estimation)
+        xc, yc = center
+        R = np.mean(calc_radius(xc, yc))
+
+        return int(xc), int(yc), int(R)
 
     def get_theta(self):
         """Return the initiale contact angle of the drop."""
-        None
+        xc, yc, R = self._get_circle_interpolation()
+        x = np.arange(self.rl, self.rr)
+        y = (yc - np.sqrt(R**2 - (x - xc)**2))
+        ca_l = np.arctan(y[1] - y[0])*180/np.pi
+        ca_r = np.arctan(y[-1] - y[-2])*180/np.pi
+
+        return ca_l, ca_r
+
+    def get_volume_truncated_sphere(self):
+        """Return the initiale volume by spherical cap hypothesis."""
+        vol = np.pi/6 * self.z0 * (
+            3*self.r0**2 + self.z0**2
+        )
+        return vol
+
+    def get_vol_calculated(self):
+        """Return calculated volume by fit circle."""
+        xc, yc, R = self._get_circle_interpolation()
+        y = np.arange(self.zb, self.z0)
+        xl = xc - np.sqrt(R**2 - (y - yc)**2)
+        xr = xc + np.sqrt(R**2 - (y - yc)**2)
+        vol = np.pi * np.sum(np.power((xr - xl)/2, 2))
+
+        return vol
+
+
+class Front:
+    """Class contains the front information."""
+
+    def __inti__(self):
+        """Init the class."""
+        self.x = None
+        self.y = None
+
+    def isEmpty(self):
+        """Return True if front has been loaded."""
+        if self.x is None:
+            return True
+        else:
+            return False
+
+
+class Contour:
+    """Class contains the front information."""
+
+    def __init__(self):
+        """Init the class."""
+        self.xl = None  # xl[t][rl:rc]
+        self.yl = None  # "
+        self.xr = None  # "
+        self.yr = None  # "
+
+        self.time = 0
+
+        self.rc = 0  # max of xl, or min of xr
+
+    def isEmpty(self):
+        """Return True if contour has not been loaded."""
+        if None in [self.xl, self.yl, self.xr, self.yr]:
+            return True
+        else:
+            return False
+
+    def set_data(self, xl, yl, xr, yr):
+        """Set the data."""
+        self.xl = xl
+        self.yl = yl
+        self.xr = xr
+        self.yr = yr
+
+        self.time = len(self.xl)
+        self.rc = int(np.max(self.xl[0]))
 
     def get_volume(self):
-        """Return the initiale volume of the drop."""
-        None
+        """Calculate the volume over time."""
+        vol = []  # init vector volume
+        plt.figure()
+        for t in range(self.time):
+            # construct r(y) interpolation
+            # -------------
+            y = list(
+                range(0, int(np.max(
+                    np.max(self.yl[0]) - self.yl[t]))+1
+                )
+            )
+
+            xl = []
+            xr = []
+            for j in y:
+                xl.append(
+                    self.xl[t][np.argmin(abs(np.max(self.yl[0]) - self.yl[t] - j))]
+                )
+                xr.append(
+                    self.xr[t][np.argmin(abs(np.max(self.yl[0]) - self.yr[t] - j))]
+                )
+            xl, xr = np.array(xl), np.array(xr)
+            # calcul the volume
+            # ---------------
+            volume_calc = (
+                np.pi/2 * np.sum(np.power(self.rc-xl, 2)) +
+                np.pi/2 * np.sum(np.power(xr-self.rc, 2))
+            )
+            if t % 50 == 0:
+                plt.plot(y, (xl-self.rc), '--og')
+                plt.plot(y, (xr-self.rc), '--or')
+
+            vol.append(volume_calc)
+        plt.show()
+        return vol
+
+    def get_height(self, loc=None):
+        """Return the height of the drop at a specific radii (loc).
+
+        input
+        -----
+            loc: int
+                Radii of the heigh to obtain. Default is None, and return the
+                height on the center.
+        """
+        z = []
+        for i in range(self.time):
+            if loc is None:
+                z.append(
+                    np.max(self.yl[0]) - self.yl[i][-1]
+                )
+
+        return z
+
+    def plot(self, dt=10):
+        """
+        Display the contour over time.
+
+        input
+        -----
+            dt: int
+                Time space between two plots.
+        """
+        plt.figure(figsize=(16, 9))
+        for i in range(0, self.time, dt):
+            plt.plot(
+                self.xl[i], np.max(self.yl[0]) - self.yl[i],
+                ls='--', color='tab:green'
+            )
+            plt.plot(
+                self.xr[i], np.max(self.yl[0]) - self.yr[i],
+                ls='--', color='tab:red'
+            )
+        plt.grid(True)
+        plt.xlabel('r (px)')
+        plt.ylabel('z_d (t) (px)')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.show()
+
+    def plot_height(self, loc=None):
+        """Display the height's drop at specific location (loc).
+
+        input
+        -----
+            loc : int
+                Radii of the heigh to obtain. Default is None, and return the
+                height on the center.
+        """
+        z = self.get_height(loc)
+        plt.plot(range(self.time), z, '--k')
+        plt.grid(True)
+        plt.xlabel('time (frame)')
+        plt.ylabel('z_d (t) (px)')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.show()
+
+
+class DataDict(dict):
+    """Defin my own dict."""
+
+    def __getitem__(self, key):
+        """Overwrite the getitem method."""
+        if key in ['t_nuc_mes', 't_end_mes']:
+            t = dict.__getitem__(self, key)
+            t = t.split(':')
+            return int(t[0])*60 + int(t[1]) + int(t[2])/60
+        else:
+            return dict.__getitem__(self, key)
+
+    def __setitem__(self, key, value):
+        """Overwrite the setitem method."""
+        """Return t_nuc_mes value."""
+        if key in ['t_nuc_mes', 't_end_mes']:
+            if type(value) is float and np.isnan(value):
+                dict.__setitem__(self, key, None)
+            else:
+                dict.__setitem__(self, key, value)
+        else:
+            dict.__setitem__(self, key, value)
+
+
+class ImageList(list):
+    """Define my own list to acces image value."""
+
+    def __getitem__(self, index):
+        """Overwrite the getitem, to have acces from 1, not from 0."""
+        if index < 0:
+            index = range(1, len(self)+1)[index]
+        if index not in range(1, len(self)+1):
+            raise IndexError('Value out of the range')
+
+        return list.__getitem__(self, index-1)
+
+
+class Data:
+    """Data class. Store all the information about the experiment."""
+
+    def __init__(self):
+        """Init the class."""
+        self.data = DataDict({
+            # identification
+            # -------------
+            'date': None, 'serie': None,
+
+            # geometry
+            # --------
+            'r0': None, 'rl': None, 'rc': None, 'rr': None,
+            'zb': None, 'z0': None, 'zf': None,
+            'ca_l': None, 'ca_r': None,
+            'isSymm': None,
+            'px_mm': None,
+
+            # time
+            # ------
+            't_nuc_mes': None, 't_end_mes': None,  # format : hh:mm:ss
+            't_nuc_calc': None, 't_ref_calc': None, 't_end_calc': None,
+            # format : frame number
+
+            # lieu
+            # -----
+            'chamber': None,  # bool (1 oui, 0, none)
+
+            # etats
+            # -----
+            'treated': None,  # bool (1 si traité 0 sinon)
+            'infos': None,  # int [0..5]
+
+            # chamber, ambiant and cryostat
+            # ----------
+            'Ta_cons': None, 'phi_cons': None,
+            'Ta_chamber': None, 'phi_chamber': None,
+            'Ta_therm': None, 'phi_hydro': None,
+            'Tc_sta': None, 'Tc_set': None, 'Tc_nuc': None,
+            'ref_therm': None,
+
+            # substrat
+            # --------
+            'alpha': None, 'ref': None,
+
+            # drop
+            # ----
+            'n_freeze': None, 'type_freeze': None,
+            'insulation': None, 'water_nfo': None,
+
+            # camera
+            # ------
+            'delay': None, 'exp': None, 'fps': None,
+            'delay_exp_real': None, 'fps_real': None,
+
+            # observation
+            # --------
+            'remarque': None
+        })
+
+    def __repr__(self):
+        """Print."""
+        return 'Experiment id : ' + self.id
+
+    def set_data(self, data):
+        """Assign all data values."""
+        switch = {
+            # id
+            # --
+            'date': 'date', 'serie': 'serie',
+
+            # geometry
+            # --------
+            'r0': 'r0', 'rl': 'rl', 'rc': 'rc', 'rr': 'rr',
+            'zb': 'zb', 'z0': 'z0', 'zf': 'zf',
+            'ca_l': 'ca_l', 'ca_r': 'ca_r',
+            'symmetrical': 'isSymm',  # bool : if is symmetrical
+
+            # time
+            # ------
+            't_nuc_mes': 't_nuc_mes', 't_end_mes': 't_end_mes',
+            # format : strint(hh:mm:ss)
+            't_nuc_calc': 't_nuc_calc',  # format : frame number
+            't_ref_calc': 't_ref_calc',  # format : frame number
+            't_end_calc': 't_end_calc',  # format : frame number
+
+            # lieu
+            # -----
+            'lieu': 'chamber',  # bool (1 oui, 0, none)
+
+            # etats
+            # -----
+            'completed_2': 'treated',  # bool (1 si traité 0 sinon)
+            'etat_2': 'infos',  # int [0..5]
+
+            # chamber, ambiant and cryostat
+            # ----------
+            'Ta': 'Ta_cons', 'phi': 'phi_cons',
+            'Ta_int': 'Ta_chamber', 'phi_int': 'phi_chamber',
+            'Ta_ext': 'Ta_therm', 'phi_ext': 'phi_hydro',
+            'Tc_sta': 'Tc_sta', 'Tc_set': 'Tc_set',
+            'Tc_nuc': 'Tc_nuc',
+            'ref_therm': 'ref_therm',
+
+            # substrat
+            # --------
+            'alpha': 'alpha', 'ref': 'ref',
+
+            # drop
+            # ----
+            'n_freezing': 'n_freeze', 'type': 'type_freeze',
+            'insulation': 'insulation', 'water': 'water_nfo',
+
+            # camera
+            # ------
+            'delay': 'delay', 'exp': 'exp', 'fps': 'fps',
+            'delay_exp_real': 'delay_exp_real', 'real_fps': 'fps_real',
+
+            # observation
+            # --------
+            'Remarques': 'remarque'
+        }
+        for s in switch:
+            if s in data:
+                self.data[switch[s]] = data[s]
+
+    @property
+    def id(self):
+        """Return unique id of the experiment."""
+        if self.data['date'] is None or self.data['serie'] is None:
+            return 'None'
+        else:
+            return self.data['date'] + 'n' + str(self.data['serie'])
 
 
 class Stack(object):
@@ -139,7 +504,7 @@ class Stack(object):
 
     """
 
-    def __init__(self, date=None, serie=None):
+    def __init__(self):
         """Init the Class.
 
         input
@@ -154,17 +519,32 @@ class Stack(object):
         If date is not None, but serie is None, will read the first serie (1).
 
         """
+        self.path = None
         self.geom = Geometry()
 
-        if date is not None:
-            if serie is None:
-                self.read_by_date(date, 1)
-            else:
-                self.read_by_date(date, serie)
+        self.data = Data()
+
+        self.isTreated = False
+        self.listResult = []
+        self.front = Front()  # x, y data fro front
+        self.contour = Contour()  # xl, yl, xr, yr for contour
+        self.geometry = Geometry()  # dict with rr, rl, rc, zf, z0 & zb
+
+        self.image = ImageList()  # array containing all Image
+        self.range_images = range(0)
+        self.n_selected = None
 
     def __str__(self):
-        """Print the data directory on the terminal."""
-        return self.data_directory
+        """Return n# image info."""
+        return "Nombre d'image importées : " + str(len(self))
+
+    def __repr__(self):
+        """Return n# image info."""
+        return self.__str__()
+
+    def __len__(self):
+        """Get the number of image."""
+        return len(self.image)
 
     def read_by_date(self, date, serie):
         """Choose the path.
@@ -179,38 +559,75 @@ class Stack(object):
             select the serie of the experiment
 
         """
-        self.data_directory = None
         df = rd.get_data()  # read data in googlesheet.
 
-        if date in list(df['date']):
-            if serie in list(df[df['date'] == date]['serie']):
-                self.data_directory = (
+        for _, row in df.iterrows():
+            cond = (
+                row['date'] == date and
+                row['serie'] == serie
+            )
+            if cond:
+                self.path = (
                     "/Volumes/EMERYK_HD/0_data/{:s}/n{:#}/".format(
                         date, int(serie)
                     )
                 )
-                self.datas = df[df['date'] == date][
-                    df['serie'] == float(serie)
-                ].copy()
-                self.data = df[df['date'] == date][
-                    df['serie'] == float(serie)
-                ].copy()
+                ind = dict(row)
+                self.data.set_data(ind)
 
                 # allocate data Values
                 # ---------------------
-                self.geom.set_r0(self.data['r0'].values)
-                self.geom.set_rc(self.data['rc'].values)
-                self.geom.set_z0(self.data['z0'].values)
-                self.geom.set_zf(None)
+                self.geom.r0 = self.data.data['r0']
+                self.geom.rc = self.data.data['rc']
+                self.geom.z0 = self.data.data['z0']
 
-        if self.data_directory is None:
-            raise IndexError(
-                'This experiment may not in the database, please add it before'
+        if os.path.exists(self.path + 'result'):
+            self.isTreated = True
+            self.listResult = [
+                l.split('/')[-1].split('.')[0]
+                for l in glob.glob(self.path + 'result/*.npy')
+            ]
+            if 'front' in self.listResult:
+                front = np.load(
+                    self.path + 'result/front.npy', allow_pickle=True
+                )
+                self.front.x = front[0]
+                self.front.y = front[1]
+
+            if 'contour' in self.listResult:
+                log("I pass here")
+                contour = np.load(
+                    self.path + 'result/contour.npy', allow_pickle=True
+                )
+                self.contour.set_data(*contour)
+                self.contour.plot(20)
+                self.contour.plot_height()
+                vol = self.contour.get_volume()
+                plt.plot(
+                    range(len(vol)), [i/vol[0] for i in vol], '--k'
+                )
+
+            if 'geom' in self.listResult:
+                ge = np.load(
+                        self.path + 'result/geom.npy', allow_pickle=True
+                    )[()]
+                self.geom.rl = ge['rl']
+                self.geom.rr = ge['rr']
+                self.geom.rc = ge['rc']
+                self.geom.zb = ge['zb']
+                self.geom.z0 = ge['z0']
+                self.geom.zf = ge['zf']
+                self.data.data['z0'] = ge['z0']
+
+        if self.path is None:
+            raise ValueError(
+                "This experiment may not be in the database" +
+                ", please add it before"
             )
 
-        self.create_directory()
+        self._set_directory()
 
-    def select_folder(self):
+    def read_select_folder(self):
         """
         UI select folder.
 
@@ -225,288 +642,217 @@ class Stack(object):
 
         self.read_by_path(date, serie)
 
-    def create_directory(self):
-        """Define output directories."""
-        self.exporting_directory = self.data_directory + 'export_image/'
-
-        if not os.path.isdir(self.exporting_directory):
-            os.makedirs(self.exporting_directory + 'lastOp/')
+    def _set_directory(self):
+        """Define direcoties."""
+        self.exporting_directory = self.path + 'export_image/'
 
     def load_images(self, regex='cam1_*', ext='.tif'):
         """Update the lists of image."""
-        # check what exists in data_folder #
-        if os.path.isdir(self.data_directory + '_export'):
-            # new procedure of reading # to work on pretreated images
-            listdir = os.listdir(self.data_directory + '_export')
+        # check what exists in data_folder (aka. pretreated images)
+        # ----------
+        if os.path.isdir(self.path + '_export'):
+            listdir = os.listdir(self.path + '_export')
+
+            # ask for what to read
             print('\t' + str(0) + '. ' + 'Original reader image')
             c = 1
             for d in listdir:
                 print('\t' + str(c) + '. ' + d)
                 c += 1
-
             num = int(input('Select a folder to read : '))
+
+            # if return is 0, read original image, else read image in the
+            # selected folder
             if num > 0:
-                self.image_list = sorted(glob.glob((
-                    self.data_directory + '_export/' + listdir[num-1] + '/' +
+                image_list = sorted(glob.glob((
+                    self.path + '_export/' + listdir[num-1] + '/' +
                     regex + ext
                 )))
             else:
-                self.image_list = sorted(glob.glob((
-                    self.exporting_directory + 'lastOp/*.npy'
+                image_list = sorted(glob.glob((
+                    self.path + regex + ext
                 )))
-        else:  # all procedure
+        # else read directly image
+        else:
             # image list
-            self.image_list = sorted(glob.glob((
-                self.exporting_directory + 'lastOp/*.npy'
+            image_list = sorted(glob.glob((
+                self.path + regex + ext
             )))
 
-        if len(self.image_list) < 1:
-            self.image_list = sorted(glob.glob((
-                self.data_directory + regex + ext
-            )))
+        self.range_images = range(1, len(image_list)+1)
 
-        self.n_image_tot = len(self.image_list)
-        self.range_images = range(1, self.n_image_tot+1)
-
-        self.current_image_number = 1
-        self.read_image()
-        print('Current image selected : 1.')
-
-    def print_info(self, type=None):
-        """
-        Show info about the stack.
-
-        Print :
-            1. directory which is loaded
-            2. number of image loaded
-            3. current image selected
-            4. first image number of the stack
-            5. last image number of the stack
-        """
-        print(
-            '\nDirectory containing data :\n   {0}'.format(self.data_directory)
-        )
-        print(
-            'Directory for exporting :\n   {0}'
-            .format(self.exporting_directory)
-        )
-        print('---image info---')
-        print('   Number of image : {0}'.format(self.n_image_tot))
-        print(
-            '   Current image selected : {0}'
-            .format(self.current_image_number)
-        )
-        if type is not None:
-            print('\n\n\n---List of images---')
-            for i in range(len(self.image_list)):
-                print('   #{0} : {1}'.format(i, self.image_list[i]))
-
-        print('---end---\n\n')
-
-    def read_image(self, ni=-1):
-        """
-        Read the image indicate by is number.
-
-        Parameters
-        ----------
-        ni : int
-            Image number to load. -1 to load current image image number.
-            Default -1.
-
-        """
-        if ni == -1:
-            ni = self.current_image_number
-
-        elif ni in self.range_images:
-            self.current_image_number = ni
-        else:
-            print(
-                (
-                    "ERROR reading image {}. It my be out of range\n" +
-                    "Current image will be 1."
-                ).format(
-                    ni
-                )
-            )
-            self.read_image(1)
-
-        self.current_image = ip.ImageProcessing(
-                self.image_list[ni-1]  # indexes starts at 0 in python
-        )
-
-    def get_image(self, ni=-1):
-        """
-        Read the image indicate by is number.
-
-        Parameters
-        ----------
-        ni : int
-            Image number to load. -1 to load current image image number.
-            Default -1.
-
-        """
-        if ni == -1:
-            ni = self.current_image_number
-
-        elif ni in self.range_images:
-            ni = ni
-
-        else:
-            print(
-                (
-                    "ERROR reading image {}. It my be out of range\n" +
-                    "Current image will be 1."
-                ).format(
-                    ni
-                )
-            )
-            self.read_image(1)
-
-        image = ip.ImageProcessing(
-            self.image_list[ni-1]  # indexes starts at 0 in python
-        )
-        return image
-
-    def treatment(self, treatment, *args, plot=True):
-        """
-        Apply a treatment to the current_image, and displays it.
-
-        Only three treatments are available for now:
-        ...crop : to crop the current_image (need 4 parameters:
-                xmin, xmax, ymin, ymax)
-        ...equalize : to equalize the image (global equalization, 2 parameters:
-                limit = .2 by default, size= 8 by default)
-        ...clahe : to equalize the image with clahe algorithm, local
-                equalization, 2 parameters:
-                    limit = .2 by default,
-                    size= 8 by default
-        """
-        if treatment == 'crop':
-            if len(args) == 4:
-                self.current_image.crop(*args)
-            else:
-                raise ValueError(
-                    'Crop treatment requires 4 arguments'
-                )
-        elif treatment == 'clahe':
-            if len(args) == 2 or len(args) == 0:
-                self.current_image.equalize_hist_by_clahe(*args)
-            else:
-                raise ValueError(
-                    'Equalize treatment require 0 or 2 arguments'
-                )
-        elif treatment == 'equalize':
-            if len(args) == 1 or len(args) == 0:
-                self.current_image.equalize_hist(*args)
-            else:
-                raise ValueError(
-                    'Equalize treatment require 0 or 1 argument'
-                )
-        else:
-            raise ValueError(
-                'The treatment you are trying to apply does not exist'
-            )
-
-        if plot:
-            self.current_image.show_image()
-
-    def remove_treatments(self):
-        """Remove all lastOp files."""
-        files = glob.glob((
-            self.exporting_directory + 'lastOp/*.npy'
-        ))
-        for i in files:
-            os.remove(i)
-        f = open(self.data_directory + ".history", "a+")
-        f.write(
-            '\tRemove all files in {:s}\n'.format(
-                self.exporting_directory + '/lastOp/'
-            )
-        )
-        f.close()
-        self.update_lists()
-        self.read_image()
-
-    def crop(self):
-        """Crop with DraggableRectangle."""
-        temp = self.current_image_number
-        self.read_image(self.n_image_tot)
-
-        fig, ax = plt.subplots(1)
-        ax.imshow(self.current_image.image, cmap='gray')
-
-        dr = drag.DraggableRectangle(ax)
-        plt.show()
-
-        if dr.valid:
-            self.save_treatment('crop', *dr.get_rect())
-
-        self.read_image(temp)
-
-    def clahe(self):
-        """Apply clahe thanks GUI."""
-        qapp = QtWidgets.QApplication(sys.argv)
-        app = cw.ClaheWindow(self.current_image)
-        app.show()
-        qapp.exec_()
-        print(app.get_data())
-
-        self.save_treatment('clahe', *app.get_data())
-
-    def save_treatment(self, treatment, *args):
-        """
-        Treat all stakck image and save them in the results directory.
-
-        Arguments are needed. There are the same than for treament, because
-        save_treatment call recursivly treament.
-        """
-        temp = self.current_image_number
-
-        # === initiate progressbar === #
-        widgets = [treatment,
+        widgets = ['Loading images',
                    ' ', progressbar.Percentage(),
                    ' ', progressbar.Bar('=', '[', ']'),
                    ' ', progressbar.ETA(),
                    ' ', progressbar.FileTransferSpeed()]
         pbar = progressbar.ProgressBar(
-            widgets=widgets, maxval=len(self.image_list)
+            widgets=widgets, maxval=len(self.range_images)+1
         )
         pbar.start()
-        # === loop over images === #
+        for n in self.range_images:
+            self.image.append(Image.Image())
+            self.image[n].read_by_path(image_list[n-1])
+            pbar.update(n)
+        pbar.finish()
+        self.n_selected = 1  # from 1 to range_image
+
+        # check previous treatment
+        # ------------
+        if os.path.exists(self.path + 'result/crop_data.npy'):
+            crop_data = np.load(self.path + 'result/crop_data.npy')
+            widgets = ['Is croping all images',
+                       ' ', progressbar.Percentage(),
+                       ' ', progressbar.Bar('=', '[', ']'),
+                       ' ', progressbar.ETA(),
+                       ' ', progressbar.FileTransferSpeed()]
+            pbar = progressbar.ProgressBar(
+                widgets=widgets, maxval=len(self)+1
+            )
+            pbar.start()
+            for i in self.range_images:
+                self.image[i].crop(*crop_data)
+                pbar.update(i)
+            pbar.finish()
+
+    def print_info(self):
+        """Show info about the stack."""
+        print()
+        print('Working directory')
+        print('-'*len('Working directory'))
+        print(self.path)
+        print()
+        print('image info')
+        print('-'*len('image info'))
+        print('Number of image : {0}'.format(len(self)))
+        print('Selected selected : {0}'.format(self.n_selected))
+        print()
+        print('Existing data')
+        print('-'*len('Existing data'))
+        print('There is results : {0}'.format(self.isTreated))
+        if self.isTreated:
+            [print('\t{0}'.format(l)) for l in self.listResult]
+        print()
+
+    def get_image(self, n=None):
+        """Return the expected Image()."""
+        if n is None:
+            n = self.n_selected
+
+        if n not in self.range_images:
+            raise IndexError('{0} is out of the range.'.format(
+                n
+            ))
+        return self.image[n]
+
+    def select_image(self, ni):
+        """Change the selected image."""
+        if ni in self.range_images:
+            self.n_selected = ni
+        else:
+            raise IndexError('Value out of the range')
+
+    def show_image(self):
+        """Show image."""
+        self.image[self.n_selected].show_image('Image #{0}/{1}'.format(
+            self.n_selected,
+            len(self)
+        ))
+
+    def crop(self):
+            """Crop with DraggableRectangle."""
+            # show the image
+            # --------------
+            plt.figure(figsize=(16, 9))
+            plt.gcf().canvas.set_window_title('Crop image')
+            ax = plt.subplot(1, 1, 1)
+            ax.imshow(self.image[-1].image, cmap='gray')
+
+            # generate rectangle
+            # --------------
+            dr = drag.DraggableRectangle(ax)
+            plt.show()
+
+            # lauch recursive crop
+            # --------------
+            if dr.valid:
+                widgets = ['Is croping all images',
+                           ' ', progressbar.Percentage(),
+                           ' ', progressbar.Bar('=', '[', ']'),
+                           ' ', progressbar.ETA(),
+                           ' ', progressbar.FileTransferSpeed()]
+                pbar = progressbar.ProgressBar(
+                    widgets=widgets, maxval=len(self)+1
+                )
+                pbar.start()
+                for i in self.range_images:
+                    self.image[i].crop(*dr.get_rect())
+                    pbar.update(i)
+                pbar.finish()
+
+                if os.path.exists(self.path + 'result/crop_data.npy'):
+                    rect = np.load(self.path + 'result/crop_data.npy')
+                    n_rect = dr.get_rect()
+                    rect[1] = rect[0] + n_rect[1]
+                    rect[0] += n_rect[0]
+                    rect[3] = rect[2] + n_rect[3]
+                    rect[2] += n_rect[2]
+                    np.save(self.path + 'result/crop_data.npy', rect)
+                else:
+                    np.save(self.path + 'result/crop_data.npy', dr.get_rect())
+
+    def clahe(self):
+        """Apply clahe thanks GUI."""
+        # get the limit and Size
+        # -------
+        qapp = QApplication.instance()
+        if qapp is None:
+            qapp = QApplication(sys.argv)
+        app = cw.ClaheWindow(self.image[self.n_selected])
+        app.show()
+        qapp.exec_()
+
+        # apply to all image (+progressbar)
+        # --------
+        widgets = ['Applying CLAHE to all images',
+                   ' ', progressbar.Percentage(),
+                   ' ', progressbar.Bar('=', '[', ']'),
+                   ' ', progressbar.ETA(),
+                   ' ', progressbar.FileTransferSpeed()]
+        pbar = progressbar.ProgressBar(
+            widgets=widgets, maxval=len(self)+1
+        )
+        pbar.start()
         for i in self.range_images:
-            self.read_image(i)
-            self.treatment(treatment, *args, plot=False)
-            if i < 10:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_000' + str(i),
-                    self.current_image.image
-                )
-            elif i < 100:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_00' + str(i),
-                    self.current_image.image
-                )
-            elif i < 1000:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_0' + str(i),
-                    self.current_image.image
-                )
+            self.image[i].equalize_hist_by_clahe(*app.get_data())
             pbar.update(i)
         pbar.finish()
 
-        # === update images infos === #
-        self.update_lists()
-        self.read_image(temp)
+    def rotate(self):
+        """Rotate all the images."""
+        # apply to all image (+progressbar)
+        # --------
+        widgets = ['Rotating images',
+                   ' ', progressbar.Percentage(),
+                   ' ', progressbar.Bar('=', '[', ']'),
+                   ' ', progressbar.ETA(),
+                   ' ', progressbar.FileTransferSpeed()]
+        pbar = progressbar.ProgressBar(
+            widgets=widgets, maxval=len(self)+1
+        )
+        pbar.start()
+        for i in self.range_images:
+            self.image[i].set_rotate(self.data.data['alpha'])
+            pbar.update(i)
+        pbar.finish()
 
-    def define_geometry(self):
-        """"Get the geometry."""
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-        temp = self.current_image_number
-        self.read_image(0)
-        im = self.current_image.rotate(angle=-ref_pente)
-        self.read_image(temp)
+    def get_geometry_by_rectangle(self):
+        """Get the geometry."""
+        alpha = -float(self.data.data['alpha'])
+        im = self.image[1].get_rotate(angle=alpha)
 
-        fig, ax = plt.subplots(1, figsize=[10, 7])
+        plt.figure(figsize=(16, 9))
+        ax = plt.subplot(1, 1, 1)
         ax.imshow(im, cmap='gray')
 
         dr = drag.DraggableRectangle(ax)
@@ -518,10 +864,12 @@ class Stack(object):
             rc = int(r0 + rect[0])
             z0 = int(rect[3] - rect[2])
 
+            print('Measure')
+            print('-'*len('Measure'))
             print('\tz0 : ', z0)
             print('\tr0 : ', r0)
             print('\trc : ', rc)
-            print('Please add this value in the table')
+            print('*Please add this value in the table')
 
     def get_spatio_col(self, row):
         """Return the diagram spatio temporel at a specific row.
@@ -529,10 +877,28 @@ class Stack(object):
         A spatio is the juxtaposition of column intensity over time.
         We obtain an image of y over t, not y over x.
         """
-        sp = np.zeros((self.current_image.get_height(), self.n_image_tot))
+        sp = np.zeros((self.image[1].get_height(), self.range_images[-1]))
         for n in self.range_images:
             im = self.get_image(n)
-            it, _ = im.col_intensity(row)
+            it = im.get_col(row)
+            sp[:, n-1] = it
+        return sp
+
+    def get_spatio_row(self, col):
+        """Return the spatio-temporel diagram at specific column.
+
+        A spatio is the juxtaposition of column intensity over time.
+        We obtain an image of y over t, not y over x.
+
+        input
+        ----
+            col : int
+                The column to s
+        """
+        sp = np.zeros((self.iamge[1].get_height(), self.range_images[-1]))
+        for n in self.range_images:
+            im = self.get_image(n)
+            it, _ = im.col_intensity(col)
             sp[:, n-1] = it
         return sp
 
@@ -544,59 +910,76 @@ class Stack(object):
             1. get geometry -- rc, rl, rr, zb, z0  & zf
             2. get volume thanks to double interpolation time + space
         """
-        temp = self.current_image_number  # store current image loaded
-
-        # load data from database
-        # -----------------------
-        r0 = self.datas['r0'].values
-        rc = self.datas['rc'].values
-
-        r_intensity = []  # init r_vector, \
-        # for the 7 position where we gonna look at the intensity
-        for i in range(7):
-            r_intensity = np.append(r_intensity, int(i*1.8*r0/6+rc-.9*r0))
-            # position from [-.9(rc-r0) ; .9(rc + r0)]
-
-        # init vectors
-        # ------------
-        interpolation = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        '''
-        interpoation vector front position z_i(time, r)
-            ndlr front position for time and r
-        '''
-        points = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        '''
-        interpoation points front position z_i(time, r)
-            ndlr front position for time and r
-        '''
-        r_space = range(0,  self.current_image.size[1])
-        # vector of r
-        z_space = np.arange(0, self.current_image.size[0])
-        # vector of z
-
-        time_ref = int(self.datas.iloc[0]['t_ref_calc'])
+        time_ref = int(self.data.data['t_ref_calc'])
         # time to start detection
-        time_end = int(self.datas.iloc[0]['t_end_calc'])
+        time_end = int(self.data.data['t_end_calc'])
         # time to end detection
 
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-        # substrate inclination
-
-        # Ste 1 - Get geometry
+        # Step 1 - Get geometry
         # ------------
-        im_init = self.get_image(time_ref).get_image()
-        im_end = self.get_image(time_end).get_image()
-        geom = lb.Geometry(im_init, im_end, px_mm=self.datas.iloc[0]['px_mm'])
-        plt.show()
+        # generic method to get/save geometry
+        def set_geom(geom=None):
+            image = [
+                self.get_image(time_ref),
+                self.get_image(time_end),
+            ]
+            geom = lb.Geometry(
+                image,
+                geom=geom,
+                px_mm=self.data.data['px_mm'],
+            )
+            plt.show()
+            geom = geom.get_geom()
+            np.save(self.path + 'result/geom', geom)
+            return geom
 
-        geom = geom.get_geom()
+        if not self.geom.isEmpty():
+            print("There's already geometry data,")
+            print("Do you want to overwrite them ? (y/n)")
+            a = input()
+            if a == 'y':
+                geom = set_geom(self.geom)
+            elif a == 'n':
+                geom = np.load(
+                    self.path + 'result/geom.npy', allow_pickle=True
+                )[()]
+            else:
+                raise ValueError("y or n are expected as answer")
+        else:
+            geom = set_geom()
+
+        self.geom.rr = geom['rr']
+        self.geom.rl = geom['rl']
+        self.geom.rc = geom['rc']
+        self.geom.zf = geom['zf']
+        self.geom.z0 = geom['z0']
+        self.geom.zb = geom['zb']
 
         # Step 2 - Double interpolation to detect contour
         # ----------------
+        def set_contour(point=None):
+            data = {
+                't_nuc': time_ref,
+                't_end': time_end,
+                'geom': geom,
+                'range_r': range_r
+            }
+            image = []
+            image.append(self.get_image(time_ref))
+            image.append(self.get_image(int((time_ref+time_end)/2)))
+            image.append(self.get_image(time_end))
+            spatio = lb.SpatioContourTrack(sp, image, data, point=point)
+            plt.show()
+            contour = spatio.get_contour()  # get the contour over time
+            self.contour.set_data(*contour)
+            points = spatio.get_tracked_points()
+
+            # save contour
+            np.save(self.path + 'result/contour', contour)
+            np.save(self.path + 'result/contour_pt', points)
+
+            return contour
+
         range_r = [
             int(geom['rl'] + 1/3*(geom['rc'] - geom['rl'])),
             int(geom['rl'] + 2/3*(geom['rc'] - geom['rl'])),
@@ -607,27 +990,36 @@ class Stack(object):
         sp = {}
         for r in range(len(range_r)):
             sp[r] = self.get_spatio_col(range_r[r])
-        data = {
-            't_nuc': time_ref,
-            't_end': time_end,
-            'geom': geom,
-            'range_r': range_r
-        }
-        image = {}
-        image[0] = self.get_image(time_ref).get_image()
-        image[1] = self.get_image(int((time_ref+time_end)/2)).get_image()
-        image[2] = self.get_image(time_end).get_image()
-        spatio = lb.SpatioContourTrack(sp, image, data)
-        plt.show()
-        contour = spatio.get_contour()  # get the contour over time
 
-        # Step 3 - Front detection
+        if not self.contour.isEmpty():  # il y a un contour
+            print("There's already a contour detected,")
+            print("Do you want to overwrite them ? (y/n)")
+            a = input()
+            if a == 'y':  # on réécrit dessus
+                contour_pt = np.load(
+                    self.path + 'result/contour_pt.npy', allow_pickle=True
+                )
+                contour = set_contour(
+                    point=contour_pt
+                )
+
+            elif a == 'n':   # on le garde tel quel
+                contour = np.load(
+                    self.path + 'result/contour.npy', allow_pickle=True
+                )
+        else:  # pas encore de contour, on le detect
+            contour = set_contour()
+
+        # display the contour
+        self.contour.plot()
+
+        # Step 3 - double interpolation to get front
         # ---------------
         frontTracker = lb.SpatioFrontTrack(sp, image, data, contour)
         plt.show()
         front = frontTracker.get_front()
 
-        if not os.path.isfile(self.data_directory + 'front_x.npy'):
+        if not os.path.isfile(self.data_directory + 'result/' + 'front_x.npy'):
             # save front (xfront, yfront)
             np.save(
                 self.data_directory + folder_name + '/front',
@@ -643,362 +1035,6 @@ class Stack(object):
                 self.data_directory + folder_name + '/geom',
                 geom
             )
-
-
-
-
-
-
-
-        # old Version
-        # ----------
-        x, y = [], []  # points locations
-        x_interp, y_interp = [], []  # interpolate line
-        for n in range(time_ref, time_end):
-            # generate useful images
-            # ----------------------
-            self.read_image(n)
-            im = self.current_image.rotate(-ref_pente)
-            image = self.current_image.rotate(-ref_pente)
-            im_grad = self.current_image.gradient(
-                5, 'sobel', 'mag', 'same', im=image
-            )
-            im_grady = self.current_image.gradient(
-                5, 'sobel', 'y', 'same', im=image
-            )
-
-            # create the tracker
-            # -----------------
-            line = lb.SplineBuilder(image, im_grad, im_grady, self.geom)
-            line.add_points(x, y)
-            line.add_line(x_interp, y_interp)
-            line.set_ref_line(x_interp, y_interp)
-            plt.show()
-
-            # get the information from the tracker
-            # ------------------
-            x, y = line.point.get_point()
-            x_interp, y_interp = line.point.get_interpolation()
-
-            # each 10 image save a temp file
-            # -------------------------
-            if n % 10 == 0:
-                None
-
-            im_grad = self.current_image.gradient(
-                5, 'sobel', 'mag', 'same', im=im
-            )
-            im_grady = self.current_image.gradient(
-                5, 'sobel', 'y', 'same', im=im
-            )
-
-            """First figure : fig
-
-            axes
-            ----
-                #nb : 4
-                ax1 : original image
-                ax2 : gradient image
-                ax3 : local zoom image
-                ax4 : grad_y image
-
-            """
-            fig = plt.figure(figsize=(16, 9))
-            fig.canvas.set_window_title('Image {}/{} ({}%)'.format(
-                    n, self.n_image_tot,
-                    int((n-time_ref)/(time_end-time_ref)*100)
-                )
-            )
-            fig.tight_layout(pad=.01, h_pad=.01, w_pad=.01)
-            ax1 = plt.subplot(2, 2, 1)
-            ax1.imshow(im, cmap=cmp, interpolation='none')
-            ax1.axis('off')
-            ax1.set_title('Original image')
-
-            ax2 = plt.subplot(2, 2, 2)
-            ax2.imshow(im_grad, cmap=cmp, interpolation='none')
-            ax2.axis('off')
-            ax2.set_title('Gradient magnitude')
-
-            ax3 = plt.subplot(2, 2, 3)
-            ax3.axis('off')
-            ax3.set_title('Zoom')
-
-            ax4 = plt.subplot(2, 2, 4)
-            ax4.imshow(im_grady, cmap=cmp, interpolation='none')
-            ax4.axis('off')
-            ax4.set_title('y-Gradient')
-
-            """Second figure : fig1
-
-            axes
-            ----
-                #nb : 7
-                axes : list
-                    Contains all the 7 axes. Each axe represent the z_position
-                    versus the intensity for one r position
-
-            """
-            fig1 = plt.figure(figsize=(16, 9))
-            fig1.canvas.set_window_title('Image {}/{} ({}%)'.format(
-                    n, self.n_image_tot,
-                    int((n-time_ref)/(time_end-time_ref)*100)
-                )
-            )
-            axes = []
-            for i in range(7):
-                axes.append(
-                    plt.subplot(
-                        1, 7, i+1,
-                        sharey=axes[0] if i > 0 else None
-                    )
-                )
-                axes[i].invert_yaxis()  # for (0,0) been up left
-                plt.xlabel('Intensity')
-
-            color = ea_color.color_met(7)  # generate 7 (beautifuls) colors
-            intensity = np.zeros([self.current_image.size[0], 7])
-
-            for i in range(7):
-                intensity[:, i] = pers_conv.sliding_mean(
-                    im_grad[:, int(i*1.8*r0/6+rc-.9*r0)], 3,
-                )
-                it = intensity[1:-1, i]
-                thres = (np.mean(it)+np.std(it))/np.max(it)
-                log(thres)
-                indexes = peaks.indexes(
-                    it,
-                    thres=thres,
-                    min_dist=30,
-                )
-                grad_intens = pers_conv.gradient(
-                    it
-                )
-
-                indexes_grad = peaks.indexes(
-                    grad_intens,
-                    thres=.5,
-                    min_dist=25,  # distance for 2 peaks
-                )
-
-                axes[i].plot(
-                    intensity[:, i],
-                    z_space,
-                    c=color[i],
-                )
-                axes[i].plot(
-                    it[indexes],
-                    indexes,
-                    ls='None',
-                    marker='x',
-                    mec='r', mfc='None',
-                )
-                axes[i].plot(
-                    grad_intens,
-                    z_space[::4],
-                    ls='--',
-                    c=color[i],
-                )
-                axes[i].plot(
-                    grad_intens[indexes_grad],
-                    indexes_grad,
-                    ls='None',
-                    marker='x',
-                    mec='r', mfc='None',
-                )
-
-                ax1.plot(
-                    [int(i*1.8*r0/6+rc-.9*r0), int(i*1.8*r0/6+rc-.9*r0)],
-                    [0, self.current_image.size[0]],
-                    c=color[i], alpha=.2, lw=2,
-                )
-                ax1.plot(
-                    int(i*1.8*r0/6+rc-.9*r0)*np.ones(len(indexes)),
-                    indexes,
-                    ls='None',
-                    marker='x', mfc='None', mec='r',
-                )
-
-            """Third figure : fig2
-
-            axes
-            ----
-                #nb : 8
-                ax2[0] : sum of column intensity (normalized)
-                ax2[1] : sum of column gradient intensity (normalized)
-                ax2[2] : sum of column gradient_y intensity (normalized)
-                ax2[3] : product of three previous intensity (normalized)
-                ax2[4] : sum of row intensity (normalized)
-                ax2[5] : sum of row gradient intensity (normalized)
-                ax2[6] : sum of row gradient_y intensity (normalized)
-                ax2[7] : product of three previous intensity (normalized)
-
-            """
-            plt.figure(figsize=[16, 9])
-            axs2 = []
-            for i in range(1, 9):
-                axs2.append(plt.subplot(2, 4, i))
-
-            """ Sum of columns"""
-            it0 = np.zeros(np.shape(im)[0])
-            it1 = np.zeros(np.shape(im)[0])
-            it2 = np.zeros(np.shape(im)[0])
-            for i in range(np.shape(im)[1]):
-                it0 += im[:, i]
-                it1 += im_grad[:, i]
-                it2 += im_grady[:, i]
-
-            # cut 2 firsts and 2 lasts points
-            it0 = it0[2:-2]
-            it1 = it1[2:-2]
-            it2 = it2[2:-2]
-
-            # normalized
-            it0 = (it0 - np.min(it0))/(np.max(it0) - np.min(it0))
-            it1 = (it1 - np.min(it1))/(np.max(it1) - np.min(it1))
-            it2 = (it2 - np.min(it2))/(np.max(it2) - np.min(it2))
-
-            # sliding average
-            # it0 = pers_conv.sliding_mean(it0, size=3)
-            # it1 = pers_conv.sliding_mean(it1, size=3)
-            # it2 = pers_conv.sliding_mean(it2, size=3)
-
-            ind0 = peaks.indexes(
-                it0,
-                thres=thres,
-                min_dist=30,
-            )
-            ind1 = peaks.indexes(
-                it1,
-                thres=thres,
-                min_dist=30,
-            )
-            ind2 = peaks.indexes(
-                it2,
-                thres=thres,
-                min_dist=30,
-            )
-
-            axs2[0].plot(range(np.shape(im)[0]-4), it0, '-', c='tab:blue')
-            axs2[0].plot(ind0, it0[ind0], ls='None', marker='x', c='r')
-            axs2[1].plot(range(np.shape(im)[0]-4), it1, '-', c='tab:orange')
-            axs2[1].plot(ind1, it1[ind1], ls='None', marker='x', c='r')
-            axs2[2].plot(range(np.shape(im)[0]-4), it2, '-', c='tab:green')
-            axs2[2].plot(ind2, it2[ind2], ls='None', marker='x', c='r')
-            axs2[3].plot(range(np.shape(im)[0]-4), it0*it1, '-', c='tab:blue')
-
-            """ Sum of rows"""
-            it0 = np.zeros(np.shape(im)[1])
-            it1 = np.zeros(np.shape(im)[1])
-            it2 = np.zeros(np.shape(im)[1])
-            for i in range(np.shape(im)[0]):
-                it0 += im[i, :]
-                it1 += im_grad[i, :]
-                it2 += im_grady[i, :]
-
-            # cut 2 firsts and 2 lasts points
-            it0 = it0[2:-2]
-            it1 = it1[2:-2]
-            it2 = it2[2:-2]
-
-            # normalized
-            it0 = (it0 - np.min(it0))/(np.max(it0) - np.min(it0))
-            it1 = (it1 - np.min(it1))/(np.max(it1) - np.min(it1))
-            it2 = (it2 - np.min(it2))/(np.max(it2) - np.min(it2))
-
-            # sliding average
-            # it0 = pers_conv.sliding_mean(it0, size=3)
-            # it1 = pers_conv.sliding_mean(it1, size=3)
-            # it2 = pers_conv.sliding_mean(it2, size=3)
-
-            ind0 = peaks.indexes(
-                it0,
-                thres=thres,
-                min_dist=30,
-            )
-            ind1 = peaks.indexes(
-                it1,
-                thres=thres,
-                min_dist=30,
-            )
-            ind2 = peaks.indexes(
-                it2,
-                thres=thres,
-                min_dist=30,
-            )
-
-            axs2[4].plot(range(np.shape(im)[1]-4), it0, '-', c='tab:blue')
-            axs2[4].plot(ind0, it0[ind0], ls='None', marker='x', c='r')
-            axs2[5].plot(range(np.shape(im)[1]-4), it1, '-', c='tab:orange')
-            axs2[5].plot(ind1, it1[ind1], ls='None', marker='x', c='r')
-            axs2[6].plot(range(np.shape(im)[1]-4), it2, '-', c='tab:green')
-            axs2[6].plot(ind2, it2[ind2], ls='None', marker='x', c='r')
-            axs2[7].plot(range(np.shape(im)[1]-4), it0*it1, '-', c='tab:blue')
-
-            if n > time_ref:
-                # plot previous line
-                ax1.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax2.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax4.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-
-                # plot previous point
-                ax1.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax2.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax4.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-
-            linebuilder = lb.SplineBuilderOld(
-                ax1, ax2, ax3, ax4, im, im_grad, im_grady,
-                axes, intensity, z_space, r_intensity
-            )
-            plt.tight_layout()
-            # plt.show()
-
-            points[n, linebuilder.xs] = linebuilder.ys
-            interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
-
-        if not os.path.isdir(self.data_directory + folder_name):
-            os.makedirs(self.data_directory + folder_name)
-
-        if not os.path.isfile(self.data_directory + 'pente.npy'):
-            np.save(
-                self.data_directory + folder_name + '/interpolation',
-                interpolation
-            )
-            np.save(
-                self.data_directory + folder_name + '/points',
-                points
-            )
-        else:
-            answer = input(
-                'Do you want to overwrite previous results ? [y/n] '
-            )
-            if answer.lower() in ['y', 'yes']:
-                os.remove(self.data_directory + 'interpolation.npy')
-                np.save(self.data_directory + 'interpolation', interpolation)
-                os.remove(self.data_directory + 'points.npy')
-                np.save(self.data_directory + 'points', points)
-
-        self.read_image(temp)
-
-        return points, interpolation
 
     def contour_tracker(self, folder_name='sa_contour', pts=[]):
         """Semi-automatic contour detection.
@@ -2800,24 +2836,6 @@ class Stack(object):
         pbar.finish()
         self.read_image(temp)
 
-    def manual_contour(self):
-        """Detect the contour of the drop over the time."""
-        # pente = np.zeros(self.n_image_tot)
-        # y0 = np.zeros((self.n_image_tot, self.current_image.size[1]))
-        # temp = self.current_image_number
-
-        time_ref = int(self.datas.iloc[0]['t_ref_calc'])
-        time_end = int(self.datas.iloc[0]['t_end_calc'])
-        if time_end + 4 < self.n_image_tot:
-            time_end += 4
-        else:
-            time_end = self.n_image_tot
-
-        ref_pente = float(self.datas.iloc[0]['alpha'].replace(',', '.'))
-
-        for i in range(time_ref, time_end):
-            self.read_image(i)
-
     def display_contour(self, ni=-1, ref=False):
         """
         Display image with the contour.
@@ -2917,3 +2935,46 @@ class GetFolderName(QWidget):
         QWidget.__init__(self)
         file = str(QFileDialog.getExistingDirectory(self, "Select Directory"))
         self.name = file
+
+
+if __name__ == '__main__':
+    # data example
+    # ------------
+    data = Data()
+    print(data)
+
+    data.data['t_nuc_mes'] = '00:12:30'
+    print(data.data['t_nuc_mes'])
+    data.data['date'] = '11-07-2019'
+    data.data['serie'] = 1
+    print(data)
+    print(data.data['rr'])
+
+    # stack example
+    # -------------
+    # instance stack
+    stack = Stack()
+    print(stack)
+
+    # read an experiment
+    stack.read_by_date('17-10-2018', 1)
+    stack.print_info()
+
+    # load the images
+    stack.load_images()
+    stack.print_info()
+    stack.select_image(23)
+    stack.show_image()
+
+    # make treatement
+    stack.rotate()
+    stack.crop()
+    stack.show_image()
+    stack.clahe()
+    stack.show_image()
+
+    # pre-info on drop
+    stack.get_geometry_by_rectangle()
+
+    # tracking drop geom/contour & front
+    stack.tracker()

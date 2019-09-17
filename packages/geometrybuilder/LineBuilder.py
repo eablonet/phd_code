@@ -273,15 +273,15 @@ class Point:
     def get_interpolation(self, kind='cubic'):
         """Return interpolate points."""
         xs, ys = self.get_sort_point()
-        plt.figure()
-        plt.plot(xs, ys, '--ob')
-        plt.plot(ys, xs, '--or')
+
         if len(self.x) in [0, 1]:
             return self.x, self.y
+
         elif len(self.x) in [2, 3]:
             x = np.arange(np.min(self.x), np.max(self.x)+1, 1)
             f = interpolate.interp1d(xs, ys, kind='slinear')
             return x, f(x)
+
         else:
             x = np.arange(np.min(self.x), np.max(self.x)+1, 1)
             f = interpolate.interp1d(xs, ys, kind=kind)
@@ -293,10 +293,7 @@ class Point:
         # -----------
         xs = [self.x[i] for i in np.argsort(self.y)]
         ys = np.sort(self.y)
-        plt.figure()
-        plt.plot(xs, ys, '--ob')
-        plt.plot(ys, xs, '--or')
-        plt.show()
+
         # interpolate r for y
         if len(self.x) in [0, 1]:
             return self.x, self.y
@@ -305,6 +302,7 @@ class Point:
             y = np.arange(ys[0], ys[-1]+1, 1)
             f = interpolate.interp1d(ys, xs, kind='slinear')
             return f(y), y
+
         else:
             y = np.arange(ys[0], ys[-1]+1, 1)
             f = interpolate.interp1d(ys, xs, kind=kind)
@@ -1283,20 +1281,19 @@ class Geometry(object):
 
     """
 
-    def __init__(self, im_init, im_end, **kwargs):
+    def __init__(self, im, geom=None, **kwargs):
         """Do the initiation."""
         # import data
         # ----------
-        self.image = Image()
-        self.image.set_image(im_init)
-        self.image.set_grad(im_end)
+        self.image = im
 
         # init data
         # ---------
+        self.geom = geom
         self.px_mm = 1
         if kwargs is not None:
             for key, val in kwargs.items():
-                if key == 'px_mm':
+                if key == 'px_mm' and val is not None:
                     self.px_mm = val
 
         # init button and selection
@@ -1326,23 +1323,37 @@ class Geometry(object):
 
         # get width and height
         # -----------
-        w, h = self.image.get_width(), self.image.get_height()
+        w, h = self.image[0].get_width(), self.image[0].get_height()
 
         # generate color and vectors position
         # ------------------
         color = ea_color.color_met(6)
-        self.x = [
-            [int(w/4), int(w/4)],
-            [int(w/2), int(w/2)],
-            [int(3*w/4), int(3*w/4)],
-            *[[0, w]]*3,
-        ]
-        self.y = [
-            *[[0, h]]*3,
-            [int(h/4), int(h/4)],
-            [int(h/2), int(h/2)],
-            [int(3*h/4), int(3*h/4)],
-        ]
+        if self.geom is None:
+            self.x = [
+                [int(w/4), int(w/4)],  # rr
+                [int(w/2), int(w/2)],  # rc
+                [int(3*w/4), int(3*w/4)],  # rl
+                *[[0, w]]*3,
+            ]
+            self.y = [
+                *[[0, h]]*3,  #
+                [int(h/4), int(h/4)],
+                [int(h/2), int(h/2)],
+                [int(3*h/4), int(3*h/4)],
+            ]
+        else:
+            self.x = [
+                [self.geom.rl]*2,  # rr
+                [self.geom.rc]*2,  # rc
+                [self.geom.rr]*2,  # rl
+                *[[0, w]]*3,
+            ]
+            self.y = [
+                *[[0, h]]*3,  #
+                [self.geom.zf]*2,  # zf
+                [self.geom.z0]*2,  # zO
+                [self.geom.zb]*2,  # zb
+            ]
 
         # loop to create axes, lines and annotation
         self.main_ax = []
@@ -1449,11 +1460,11 @@ class Geometry(object):
         # display images
         # --------------
         self.main_ax[0].imshow(
-            self.image.get_image(),
+            self.image[0].get_image(),
             cmap='pink'
         )
         self.main_ax[1].imshow(
-            self.image.get_grad(),
+            self.image[1].get_image(),
             cmap='pink'
         )
 
@@ -1542,15 +1553,6 @@ class Geometry(object):
             self.main_quadratic_line[i].set_data(x, y)
 
             xc, yc, R = self.get_circle_interpolation()
-            x = np.arange(xc-R, xc+R)
-            y = yc + np.sqrt(R**2 - (x - xc)**2)
-            y = np.concatenate((y, (yc - np.sqrt(R**2 - (x - xc)**2))), axis=0)
-            x = np.tile(x, 2)
-            # self.main_circle_line[i].set_data(x, y)
-
-            # update annotation
-            # -----------------
-            # volumes
             y = np.arange(self.y[4][0], self.y[5][0])
             xl = xc - np.sqrt(R**2 - (y - yc)**2)
             xr = xc + np.sqrt(R**2 - (y - yc)**2)
@@ -1558,6 +1560,9 @@ class Geometry(object):
             x = np.concatenate((xl, xr[::-1]))
             self.main_circle_line[i].set_data(x, y)
 
+            # update annotation
+            # -----------------
+            # volumes
             vol_calc = np.pi * np.sum(np.power((xr - xl)/2, 2))
             # vol_calc = np.pi * ((self.x[2][0] - self.x[0][0])/2) * sum(y)
             vol_est = (
@@ -1568,7 +1573,6 @@ class Geometry(object):
                     (self.y[5][0] - self.y[4][0])**2  # z0
                 )
             )
-
             x = np.arange(self.x[0][0], self.x[2][0])
             y = (yc - np.sqrt(R**2 - (x - xc)**2))
             y = self.y[5][0] - y
@@ -1672,15 +1676,12 @@ class Geometry(object):
 class SpatioContourTrack(object):
     """Track the contour thanks to spatio."""
 
-    def __init__(self, spatio, image, data):
+    def __init__(self, spatio, image, data, point=None):
         """Init the class."""
         # store data
         # ---------
         self.spatio = spatio
-        self.image = Image()
-        self.image.set_image(image[0])
-        self.image.set_grad(image[1])
-        self.image.set_grady(image[2])
+        self.image = image
         self.t_nuc = data['t_nuc']
         self.t_end = data['t_end']
         self.z0 = data['geom']['z0']
@@ -1698,12 +1699,28 @@ class SpatioContourTrack(object):
 
         # init values
         # -----------
+        top = self.zf - 10
+        top = top if top > 0 else 0
+        self.dz = top
+
         self.curves = []
         for i in range(5):
             self.curves.append(Point())
-            self.curves[i].add_point(self.t_nuc, self.z0)
-            self.curves[i].add_point(self.t_end, self.zf)
-            self.curves[i].set_selected_by_location(self.t_nuc, self.z0)
+            if point is None:
+                self.curves[i].add_point(self.t_nuc, self.z0-self.dz)
+                self.curves[i].add_point(self.t_end, self.zf-self.dz)
+                self.curves[i].set_selected_by_location(
+                    self.t_nuc, self.z0-self.dz
+                )
+            else:
+                self.curves[i].add_point(*point[i][0])
+                self.curves[i].set_selected_by_location(
+                    *point[i][0]
+                )
+                self.curves[i].add_point(*point[i][-1])
+                for j in range(1, len(point[i])-1):
+                    self.curves[i].add_point(*point[i][j])
+
         self.n_selected_ax = 0
         self.press_key = None
 
@@ -1741,109 +1758,84 @@ class SpatioContourTrack(object):
         # Declare axes
         # ------------
         txt = [
-            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$',
-            r'1 : $\frac{r}{r_0} = -\frac{1}{3}$',
-            r'2 : $\frac{r}{r_0} = 0$',
-            r'3 : $\frac{r}{r_0} = \frac{1}{3}$',
-            r'4 : $\frac{r}{r_0} = \frac{2}{3}$',
-            'Contour vs time',
             r'Image at $t=0$',
             r'Image at $t=t_{tot}/2$',
             r'Image at $t=t_{tot}$',
+            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$',
         ]
-        self.main_ax = []
-        for i in range(9):
-            self.main_ax.append(plt.subplot(3, 3, i+1))
+        self.main_ax = [
+            plt.subplot2grid((3, 3), (0, 0)),
+            plt.subplot2grid((3, 3), (1, 0)),
+            plt.subplot2grid((3, 3), (2, 0)),
+            plt.subplot2grid((3, 3), (0, 1), colspan=2, rowspan=3)
+        ]
+        for i in range(4):
             self.main_ax[i].set_title(txt[i])
-
-        # color selected axe
-        # ----------
-        for spine in self.main_ax[0].spines.values():
-            spine.set_color('tab:red')
-            spine.set_linewidth(2)
 
         # show spatio and image
         # --------------
-        top = self.zf - 10
-        top = top if top > 0 else 0
-        self.dz = top
         bottom = self.zb + 10
         bottom = bottom if (
-            bottom < self.image.get_height()
-        ) else self.image.get_height()
-        for i in range(5):
-            self.main_ax[i].imshow(
-                self.spatio[i][top:bottom, :], cmap='pink'
-            )
-        self.main_ax[6].imshow(self.image.get_image(), cmap='pink')
-        self.main_ax[7].imshow(self.image.get_grad(), cmap='pink')
-        self.main_ax[8].imshow(self.image.get_grady(), cmap='pink')
+            bottom < self.image[0].get_height()
+        ) else self.image[0].get_height()
+
+        self.main_ax[3].imshow(
+            self.spatio[self.n_selected_ax][self.dz:bottom, :], cmap='pink'
+        )
+        self.main_ax[0].imshow(self.image[0].get_image(), cmap='pink')
+        self.main_ax[1].imshow(self.image[1].get_image(), cmap='pink')
+        self.main_ax[2].imshow(self.image[2].get_image(), cmap='pink')
 
         # guidelines
         # # ----------
         self.main_guidLines = []
-        for i in range(5):
-            self.main_guidLines.append([])
-            for k in range(4):
-                self.main_guidLines[i].append(
-                    self.main_ax[i].plot(
-                        [], [],
-                        ls='-.', marker='None',
-                        color='tab:orange', alpha=.3
-                    )[0]
-                )
+        for i in range(4):
+            self.main_guidLines.append(
+                self.main_ax[3].plot(
+                    [], [],
+                    ls='-.', marker='None',
+                    color='tab:orange', alpha=.3
+                )[0]
+            )
 
         # start point, end point, other point
         # ------------
-        self.main_startDot = []
-        self.main_endDot = []
-        self.main_point = []
-        for i in range(5):
-            x, y = self.curves[i].get_sort_point()
-            self.main_startDot.append(
-                self.main_ax[i].plot(
-                    x[0], y[0]-self.dz,  # dz to correct the crop
-                    ls='none', marker='x',
-                    mec='tab:green', mfc='none',
-                    ms=4, alpha=.5
-                )[0]
-            )
-            self.main_endDot.append(
-                self.main_ax[i].plot(
-                    x[-1], y[-1] - self.dz,  # dz to correct the crop
-                    ls='none', marker='x',
-                    mec='tab:blue', mfc='none',
-                    ms=4, alpha=.5
-                )[0]
-            )
-            self.main_point.append(
-                self.main_ax[i].plot(
-                    [], [],
-                    ls='none', marker='x',
-                    mec='tab:orange', mfc='none',
-                    ms=4, alpha=.5
-                )[0]
-            )
+        x, y = self.curves[self.n_selected_ax].get_sort_point()
+        self.main_startDot = self.main_ax[3].plot(
+            x[0], y[0],  # dz to correct the crop
+            ls='none', marker='x',
+            mec='tab:green', mfc='none',
+            ms=4, alpha=.5
+        )[0]
+
+        self.main_endDot = self.main_ax[3].plot(
+            x[-1], y[-1],  # dz to correct the crop
+            ls='none', marker='x',
+            mec='tab:blue', mfc='none',
+            ms=4, alpha=.5
+        )[0]
+        self.main_point = self.main_ax[3].plot(
+            x[1:-1], y[1:-1],
+            ls='none', marker='x',
+            mec='tab:orange', mfc='none',
+            ms=4, alpha=.5
+        )[0]
 
         # interpolated lines
         # -----------------
-        self.main_interpolatedLines = []
-        for i in range(5):
-            x, y = self.curves[i].get_interpolation()
-            self.main_interpolatedLines.append(
-                self.main_ax[i].plot(
-                    x, y - self.dz,
-                    ls='-.', marker='None',
-                    c='tab:blue', alpha=.3,
-                )[0]
-            )
+        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        self.main_interpolatedLines = self.main_ax[3].plot(
+            x, y,
+            ls='-.', marker='None',
+            c='tab:blue', alpha=.3,
+        )[0]
 
         # contour line/dot in image
         # ----------------
         self.main_contourLine_left = []
         self.main_contourLine_right = []
         self.main_contourPoint = []
-        for i in range(6, 9):
+        for i in range(3):
             self.main_contourLine_left.append(
                 self.main_ax[i].plot(
                     [], [],
@@ -1866,44 +1858,50 @@ class SpatioContourTrack(object):
                     ms=4, alpha=.5
                 )[0]
             )
+        for k in range(3):
+            contourCurve_left = Point()
+            contourCurve_right = Point()
+            for i in range(3):
+                _, y = self.curves[i].get_interpolation()
+                y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
+                # dz correct the crop of spatios
+                contourCurve_left.add_point(self.range_r[i], y)
+            for i in range(2, 5):
+                _, y = self.curves[i].get_interpolation()
+                y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
+                # dz correct the crop of spatios
+                contourCurve_right.add_point(self.range_r[i], y)
+            contourCurve_left.add_point(self.rl, self.zb)
+            contourCurve_right.add_point(self.rr, self.zb)
 
-        # init plot for volume
-        # -------------------
-        self.main_volPlot = self.main_ax[5].plot(
-            [], [],
-            ls='-.', marker='s', markevery=20,
-            color='tab:blue',
-            label=r'Volume $(V/V_0)$',
-        )[0]
-        self.main_heightPlot = self.main_ax[5].plot(
-            [], [],
-            ls='-.', marker='^', markevery=20,
-            color='tab:red',
-            label=r'Height $(h/h_0)$',
-        )[0]
-        self.main_ax[5].grid(True)
-        self.main_ax[5].set_xlim(0, self.t_end+1-self.t_nuc)
-        self.main_ax[5].set_ylim(.9, 1.4)
+            x, y = contourCurve_left.get_interpolation()
+            self.main_contourLine_left[k].set_data(x, y)
+            x, y = contourCurve_right.get_interpolation()
+            self.main_contourLine_right[k].set_data(x, y)
+
+            x0, y0 = contourCurve_left.get_point()
+            x1, y1 = contourCurve_right.get_point()
+            self.main_contourPoint[k].set_data(x0+x1, y0+y1)
 
     def update_fig(self):
         """Update figure."""
         # display new dots
         # ----------------
         x, y = self.curves[self.n_selected_ax].get_sort_point()
-        self.main_startDot[self.n_selected_ax].set_data(
+        self.main_startDot.set_data(
             x[0], y[0]
         )
-        self.main_point[self.n_selected_ax].set_data(
+        self.main_point.set_data(
             x[1:-1], y[1:-1]
         )
-        self.main_endDot[self.n_selected_ax].set_data(
+        self.main_endDot.set_data(
             x[-1], y[-1]
         )
 
         # display interpolation
         # --------------------
         x, y = self.curves[self.n_selected_ax].get_interpolation()
-        self.main_interpolatedLines[self.n_selected_ax].set_data(x, y)
+        self.main_interpolatedLines.set_data(x, y)
 
         # update image figures
         # -------------------
@@ -1936,28 +1934,52 @@ class SpatioContourTrack(object):
         # -----------
         self.main_fig.canvas.draw()
 
-    def _ax_change(self, ax):
-        for spine in self.main_ax[self.n_selected_ax].spines.values():
-            spine.set_color('k')
-            spine.set_linewidth(1)
-        for i in range(5):
-            if self.main_ax[i] == ax:
-                self.n_selected_ax = i
-        for spine in self.main_ax[self.n_selected_ax].spines.values():
-            spine.set_color('tab:red')
-            spine.set_linewidth(2)
+    def update_spatio(self):
+        """Update spatio image."""
+        txt = [
+            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$',
+            r'1 : $\frac{r}{r_0} = -\frac{1}{3}$',
+            r'2 : $\frac{r}{r_0} = 0$',
+            r'3 : $\frac{r}{r_0} = \frac{1}{3}$',
+            r'4 : $\frac{r}{r_0} = \frac{2}{3}$',
+        ]
 
-        self.update_fig()
+        # show spatio and image
+        # --------------
+        bottom = self.zb + 10
+        bottom = bottom if (
+            bottom < self.image[0].get_height()
+        ) else self.image[0].get_height()
+
+        self.main_ax[3].imshow(
+            self.spatio[self.n_selected_ax][self.dz:bottom, :], cmap='pink'
+        )
+        self.main_ax[3].set_title(txt[self.n_selected_ax])
+
+        # start point, end point, other point
+        # ------------
+        x, y = self.curves[self.n_selected_ax].get_sort_point()
+        self.main_startDot.set_data(
+            x[0], y[0],  # dz to correct the crop
+        )
+        self.main_endDot.set_data(
+            x[-1], y[-1],  # dz to correct the crop
+        )
+        self.main_point.set_data(
+            x[1:-1], y[1:-1]
+        )
+
+        # interpolated lines
+        # -----------------
+        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        self.main_interpolatedLines.set_data(
+            x, y,
+        )
+        self.main_fig.canvas.draw()
 
     def on_release_mousse(self, event):
         """Click action on axes."""
         if event.inaxes not in self.main_ax:
-            return
-
-        # Axe is changing
-        # ---------------
-        if self.main_ax[self.n_selected_ax] != event.inaxes:
-            self._ax_change(event.inaxes)
             return
 
         # get click information
@@ -2030,7 +2052,19 @@ class SpatioContourTrack(object):
         # change the selected ax
         # ----------------
         if self.press_key in [str(k) for k in range(5)]:
-            self._ax_change(self.main_ax[int(self.press_key)])
+            self.n_selected_ax = int(self.press_key)
+            self.update_spatio()
+            self.press_key = None
+            return
+
+        if self.press_key in ['n', 'p']:
+            if self.n_selected_ax in range(1, 4):
+                self.n_selected_ax += 1 if self.press_key == 'n' else -1
+            elif self.n_selected_ax == 0:
+                self.n_selected_ax = 1 if self.press_key == 'n' else 4
+            elif self.n_selected_ax == 4:
+                self.n_selected_ax = 0 if self.press_key == 'n' else 3
+            self.update_spatio()
             self.press_key = None
             return
 
@@ -2136,6 +2170,15 @@ class SpatioContourTrack(object):
             yr.append(y1)
         return xl, yl, xr, yr
 
+    def get_tracked_points(self):
+        """Return point detected."""
+        pt = []
+        for i in range(5):
+            pt.append([])
+            for j in range(len(self.curves[i].x)):
+                pt[i].append([self.curves[i].x[j], self.curves[i].y[j]])
+        return pt
+
     def get_volume(self):
         """Calculate the volume cross time."""
         vol = []  # init vector volume
@@ -2196,10 +2239,7 @@ class SpatioFrontTrack(object):
         # store data
         # ---------
         self.spatio = spatio
-        self.image = Image()
-        self.image.set_image(image[0])
-        self.image.set_grad(image[1])
-        self.image.set_grady(image[2])
+        self.image = image
 
         # time
         # -----
@@ -2270,15 +2310,16 @@ class SpatioFrontTrack(object):
         # Declare axes
         # ------------
         txt = [
-            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$',
+            r'Image at $t=0$',
+            r'Image at $t=t_{tot}/2$',
+            r'Image at $t=t_{tot}$',
+            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$'
+        ]
+        txt_save = [
             r'1 : $\frac{r}{r_0} = -\frac{1}{3}$',
             r'2 : $\frac{r}{r_0} = 0$',
             r'3 : $\frac{r}{r_0} = \frac{1}{3}$',
             r'4 : $\frac{r}{r_0} = \frac{2}{3}$',
-            'mean(y) over time',
-            r'Image at $t=0$',
-            r'Image at $t=t_{tot}/2$',
-            r'Image at $t=t_{tot}$',
         ]
         self.main_ax = []
         for i in range(9):
@@ -2309,9 +2350,9 @@ class SpatioFrontTrack(object):
                 self.t_nuc, self.zb-self.dz
             )
 
-        self.main_ax[6].imshow(self.image.get_image(), cmap='pink')
-        self.main_ax[7].imshow(self.image.get_grad(), cmap='pink')
-        self.main_ax[8].imshow(self.image.get_grady(), cmap='pink')
+        self.main_ax[6].imshow(self.image[0].get_image(), cmap='pink')
+        self.main_ax[7].imshow(self.image[1].get_image(), cmap='pink')
+        self.main_ax[8].imshow(self.image[2].get_image(), cmap='pink')
 
         # guidelines
         # ----------

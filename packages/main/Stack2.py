@@ -65,6 +65,8 @@ from ..geometrybuilder import LineBuilder as lb
 from ..geometrybuilder import DraggrableRectangle as drag
 from ..geometrybuilder import Geometry as geom
 
+from packages.gui import ploter as pl
+
 from packages.design import color as ea_color
 from packages.library import main as pers_conv
 
@@ -102,7 +104,10 @@ class Geometry:
 
         This mean that rr, rl zb or zf are not None.
         """
+        # because zf is only calculated by track_geometry.
+        # Is not in the database
         if self.zf is None:
+
             return True
         else:
             return False
@@ -180,7 +185,7 @@ class Geometry:
 class Front:
     """Class contains the front information."""
 
-    def __inti__(self):
+    def __init__(self):
         """Init the class."""
         self.x = None
         self.y = None
@@ -191,6 +196,20 @@ class Front:
             return True
         else:
             return False
+
+    def plot(self, dt=10):
+        """Display front plot."""
+        plt.figure(figsize=(9, 4.5))
+        for i in range(0, len(self.x), dt):
+            plt.plot(
+                self.x[i], self.y[i],
+                ls='--', color='tab:blue'
+            )
+        plt.grid(True)
+        plt.xlabel('r (px)')
+        plt.ylabel('z_d (t) (px)')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.show()
 
 
 class Contour:
@@ -227,7 +246,7 @@ class Contour:
     def get_volume(self):
         """Calculate the volume over time."""
         vol = []  # init vector volume
-        plt.figure()
+
         for t in range(self.time):
             # construct r(y) interpolation
             # -------------
@@ -241,10 +260,14 @@ class Contour:
             xr = []
             for j in y:
                 xl.append(
-                    self.xl[t][np.argmin(abs(np.max(self.yl[0]) - self.yl[t] - j))]
+                    self.xl[t][np.argmin(abs(
+                        np.max(self.yl[0]) - self.yl[t] - j
+                    ))]
                 )
                 xr.append(
-                    self.xr[t][np.argmin(abs(np.max(self.yl[0]) - self.yr[t] - j))]
+                    self.xr[t][np.argmin(abs(
+                        np.max(self.yl[0]) - self.yr[t] - j
+                    ))]
                 )
             xl, xr = np.array(xl), np.array(xr)
             # calcul the volume
@@ -253,12 +276,8 @@ class Contour:
                 np.pi/2 * np.sum(np.power(self.rc-xl, 2)) +
                 np.pi/2 * np.sum(np.power(xr-self.rc, 2))
             )
-            if t % 50 == 0:
-                plt.plot(y, (xl-self.rc), '--og')
-                plt.plot(y, (xr-self.rc), '--or')
 
             vol.append(volume_calc)
-        plt.show()
         return vol
 
     def get_height(self, loc=None):
@@ -320,6 +339,44 @@ class Contour:
         plt.ylabel('z_d (t) (px)')
         plt.gca().set_aspect('equal', adjustable='box')
         plt.show()
+
+    def plot_volume(self, dt=4, add_to_ax=False, adim=True):
+        """Plot the volume over time.
+
+        input
+        -----
+            add_to_ax : bool
+                True to add to an exiting axis, False to plot directly.
+                (Display directly the figure)
+            adim : bool
+                To adimentionalize the volume. Default is true.
+
+        """
+        if not add_to_ax:
+            fig = pl.Figure()
+            fig.set_win_title("Volume over time")
+            ax = fig.add_ax(111)
+            ax.ax.set_title("Evolution du volume au cours du temps")
+            ax.xlabel('Time (frame)')
+            ax.ylabel(r'$V/V_0$')
+
+        else:
+            ax = plt.gca()
+
+        vol = self.get_volume()
+
+        if adim:
+            vol = [v / vol[0] for v in vol]
+
+        ax.plot(
+            range(len(vol)), vol,
+            ls='-.', marker='o',
+            color='tab:red',
+            markevery=dt,  mfc='none', mec='tab:red',
+        )
+
+        if not add_to_ax:
+            fig.show()
 
 
 class DataDict(dict):
@@ -595,17 +652,10 @@ class Stack(object):
                 self.front.y = front[1]
 
             if 'contour' in self.listResult:
-                log("I pass here")
                 contour = np.load(
                     self.path + 'result/contour.npy', allow_pickle=True
                 )
                 self.contour.set_data(*contour)
-                self.contour.plot(20)
-                self.contour.plot_height()
-                vol = self.contour.get_volume()
-                plt.plot(
-                    range(len(vol)), [i/vol[0] for i in vol], '--k'
-                )
 
             if 'geom' in self.listResult:
                 ge = np.load(
@@ -902,26 +952,18 @@ class Stack(object):
             sp[:, n-1] = it
         return sp
 
-    def tracker(self, folder_name='front', pts=[], cmp='pink'):
-        """Get the front manually.
-
-        Steps :
-        -------
-            1. get geometry -- rc, rl, rr, zb, z0  & zf
-            2. get volume thanks to double interpolation time + space
-        """
-        time_ref = int(self.data.data['t_ref_calc'])
-        # time to start detection
-        time_end = int(self.data.data['t_end_calc'])
-        # time to end detection
+    def track_geometry(self):
+        """Detect the geomtry."""
+        t_ref = int(self.data.data['t_ref_calc'])
+        t_end = int(self.data.data['t_end_calc'])
 
         # Step 1 - Get geometry
         # ------------
         # generic method to get/save geometry
         def set_geom(geom=None):
             image = [
-                self.get_image(time_ref),
-                self.get_image(time_end),
+                self.get_image(t_ref),
+                self.get_image(t_end),
             ]
             geom = lb.Geometry(
                 image,
@@ -931,43 +973,75 @@ class Stack(object):
             plt.show()
             geom = geom.get_geom()
             np.save(self.path + 'result/geom', geom)
-            return geom
+
+            # update geometry data
+            # ====================
+            self.geom.rr = geom['rr']
+            self.geom.rl = geom['rl']
+            self.geom.rc = geom['rc']
+            self.geom.zf = geom['zf']
+            self.geom.z0 = geom['z0']
+            self.geom.zb = geom['zb']
 
         if not self.geom.isEmpty():
             print("There's already geometry data,")
             print("Do you want to overwrite them ? (y/n)")
             a = input()
-            if a == 'y':
-                geom = set_geom(self.geom)
-            elif a == 'n':
-                geom = np.load(
-                    self.path + 'result/geom.npy', allow_pickle=True
-                )[()]
-            else:
-                raise ValueError("y or n are expected as answer")
+
+            while True:
+                if a == 'y':
+                    set_geom(self.geom)
+                    break
+                elif a == 'n':
+                    break
+                else:
+                    print("y or n are expected as answer")
+                    a = input()
         else:
-            geom = set_geom()
+            set_geom()
 
-        self.geom.rr = geom['rr']
-        self.geom.rl = geom['rl']
-        self.geom.rc = geom['rc']
-        self.geom.zf = geom['zf']
-        self.geom.z0 = geom['z0']
-        self.geom.zb = geom['zb']
+    def track_contour(self):
+        """Detect the contour from spatio."""
+        if self.geom.isEmpty():
+            raise ImportError(
+                "Geometry is not available." +
+                "Please to track the geomtry first."
+            )
 
-        # Step 2 - Double interpolation to detect contour
-        # ----------------
         def set_contour(point=None):
+            # spatio location
+            # ----------
+            range_r = [
+                int(self.geom.rl + 1/3*(self.geom.rc - self.geom.rl)),
+                int(self.geom.rl + 2/3*(self.geom.rc - self.geom.rl)),
+                int(self.geom.rc),
+                int(self.geom.rc + 1/3*(self.geom.rr - self.geom.rc)),
+                int(self.geom.rc + 2/3*(self.geom.rr - self.geom.rc)),
+            ]
+
+            # data dictionary
+            # -------
+            t_nuc = int(self.data.data['t_nuc_calc'])
+            t_end = int(self.data.data['t_end_calc'])
             data = {
-                't_nuc': time_ref,
-                't_end': time_end,
-                'geom': geom,
+                't_nuc': t_nuc,
+                't_end': t_end,
+                'geom': self.geom,
                 'range_r': range_r
             }
+
+            # select images
+            # ----------
             image = []
-            image.append(self.get_image(time_ref))
-            image.append(self.get_image(int((time_ref+time_end)/2)))
-            image.append(self.get_image(time_end))
+            image.append(self.get_image(t_nuc))
+            image.append(self.get_image(int((t_nuc+t_end)/2)))
+            image.append(self.get_image(t_end))
+
+            # select spatio
+            # ----------
+            sp = {}
+            for r in range(len(range_r)):
+                sp[r] = self.get_spatio_col(range_r[r])
             spatio = lb.SpatioContourTrack(sp, image, data, point=point)
             plt.show()
             contour = spatio.get_contour()  # get the contour over time
@@ -978,792 +1052,108 @@ class Stack(object):
             np.save(self.path + 'result/contour', contour)
             np.save(self.path + 'result/contour_pt', points)
 
-            return contour
-
-        range_r = [
-            int(geom['rl'] + 1/3*(geom['rc'] - geom['rl'])),
-            int(geom['rl'] + 2/3*(geom['rc'] - geom['rl'])),
-            int(geom['rc']),
-            int(geom['rc'] + 1/3*(geom['rr'] - geom['rc'])),
-            int(geom['rc'] + 2/3*(geom['rr'] - geom['rc'])),
-        ]
-        sp = {}
-        for r in range(len(range_r)):
-            sp[r] = self.get_spatio_col(range_r[r])
-
         if not self.contour.isEmpty():  # il y a un contour
             print("There's already a contour detected,")
             print("Do you want to overwrite them ? (y/n)")
             a = input()
-            if a == 'y':  # on réécrit dessus
-                contour_pt = np.load(
-                    self.path + 'result/contour_pt.npy', allow_pickle=True
-                )
-                contour = set_contour(
-                    point=contour_pt
-                )
+            while True:
+                if a == 'y':  # on réécrit dessus
+                    contour_pt = np.load(
+                        self.path + 'result/contour_pt.npy', allow_pickle=True
+                    )
+                    set_contour(
+                        point=contour_pt
+                    )
+                    break
+                elif a == 'n':   # on le garde tel quel
+                    break
+                else:
+                    print("y or n are expected as answer")
+                    a = input()
 
-            elif a == 'n':   # on le garde tel quel
-                contour = np.load(
-                    self.path + 'result/contour.npy', allow_pickle=True
-                )
         else:  # pas encore de contour, on le detect
-            contour = set_contour()
+            set_contour()
 
         # display the contour
         self.contour.plot()
 
-        # Step 3 - double interpolation to get front
-        # ---------------
-        frontTracker = lb.SpatioFrontTrack(sp, image, data, contour)
-        plt.show()
-        front = frontTracker.get_front()
-
-        if not os.path.isfile(self.data_directory + 'result/' + 'front_x.npy'):
-            # save front (xfront, yfront)
-            np.save(
-                self.data_directory + folder_name + '/front',
-                front
-            )
-            # save contour (cx_left, cy_left, cx_right, cy_right)
-            np.save(
-                self.data_directory + folder_name + '/contour',
-                contour
-            )
-            # save rc, rl, rr, zb, z0, zf
-            np.save(
-                self.data_directory + folder_name + '/geom',
-                geom
+    def track_front(self):
+        """Get the front manually."""
+        if self.contour.isEmpty():
+            raise ImportError(
+                "Geometry is not available." +
+                "Please to track the geomtry first."
             )
 
-    def contour_tracker(self, folder_name='sa_contour', pts=[]):
-        """Semi-automatic contour detection.
+        def set_front(point=None):
+            # create data field to pass to UI
+            # ----------
+            # spatio location
+            # ----------
+            range_r = [
+                int(self.geom.rl + 1/3*(self.geom.rc - self.geom.rl)),
+                int(self.geom.rl + 2/3*(self.geom.rc - self.geom.rl)),
+                int(self.geom.rc),
+                int(self.geom.rc + 1/3*(self.geom.rr - self.geom.rc)),
+                int(self.geom.rc + 2/3*(self.geom.rr - self.geom.rc)),
+            ]
 
-        Steps:
-        -------
-        1. Manual detect contour from tref to tref+4
-        2. Manuel detect contour at (t_end-t_ref)/4, (t_end-t_ref)/2,
-            3*(t_end-t_ref)/4, and t_end
-        3. Get rc_left, rc_right, z0, and zf
-        4. Create mask with previous data (M)
-        5. Compute gradient for each image. Masked-it with M.
-        6. Seperate left and right image.
-        7. On each side get xc(yc) in px. (ndrl max du gradient dans le masque)
-        8. Re-construct contour.
+            t_nuc = int(self.data.data['t_nuc_calc'])
+            t_end = int(self.data.data['t_end_calc'])
 
-        """
-        temp = self.current_image_number
+            data = {
+                't_nuc': t_nuc,
+                't_end': t_end,
+                'geom': self.geom,
+                'range_r': range_r
+            }
 
-        interpolation = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        points = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        Cr_left = np.zeros(
-            (self.n_image_tot, self.current_image.size[0])
-        )
-        Cr_right = np.zeros(
-            (self.n_image_tot, self.current_image.size[0])
-        )
-        Cz = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        r_space = range(0,  self.current_image.size[1])
+            # create image and spatio
+            # ---------
+            image = []
+            image.append(self.get_image(t_nuc+10))
+            image.append(self.get_image(int((t_nuc+t_end)/2)))
+            image.append(self.get_image(t_end-10))
 
-        time_ref = int(self.datas.iloc[0]['t_ref_calc'])
-        # time to start detection
-        time_end = int(self.datas.iloc[0]['t_end_calc'])
-        time_nuc = int(self.datas.iloc[0]['t_nuc_calc'])
-        # time to end detection
+            sp = {}
+            for r in range(len(range_r)):
+                sp[r] = self.get_spatio_col(range_r[r])
 
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-        # substrate inclination
-
-        im_list = [time_ref, time_nuc, time_end]
-        # print(im_list)
-        # im_list.append(int((time_end-time_ref)/4+time_ref))
-        # im_list.append(int((time_end-time_ref)/2+time_ref))
-        # im_list.append(int(3*(time_end-time_ref)/4+time_ref))
-        # im_list.append(int(time_end))
-
-        for n in im_list:
-            self.read_image(n)
-            im = self.current_image.rotate(-ref_pente)
-
-            # time gradient image ax3
-            if n < self.n_image_tot+1 and n > 0:
-
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = (2*im - im_b - im_a)/2
-
-            elif n == 0:
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im_a - im
-
-            elif n == self.n_image_tot:
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im - im_b
-
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'valid')
-            im_grady = self.current_image.gradient(5, 'sobel', 'y', 'valid')
-            im_grad = self.current_image.rotate(-ref_pente, im_grad)
-
-            fig = plt.figure(figsize=(20, 10))
-            fig.canvas.set_window_title('Image {}/{}'.format(
-                    n, self.n_image_tot+1
-                )
+            # track front
+            # -----------
+            frontTracker = lb.SpatioFrontTrack(
+                sp, image, data, self.contour, front_pt
             )
-            ax1 = plt.subplot(2, 2, 1)
-            ax1.imshow(im, cmap='gray')
-            ax1.axis('off')
-            ax1.set_title('Original image')
-
-            ax2 = plt.subplot(2, 2, 2)
-            ax2.imshow(im_grad, cmap='gray')
-            ax2.axis('off')
-            ax2.set_title('Gradient magnitude')
-
-            ax3 = plt.subplot(2, 2, 3)
-            ax3.imshow(im_time, cmap='gray')
-            ax3.axis('off')
-            ax3.set_title('Time gradient')
-
-            ax4 = plt.subplot(2, 2, 4)
-            ax4.imshow(im_grady, cmap='gray')
-            ax4.axis('off')
-            ax4.set_title('y-Gradient')
-
-            if n > time_ref:
-                # plot previous line
-                ax1.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax2.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax3.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax4.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-
-                # plot previous point
-                ax1.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax2.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax3.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax4.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-
-                ylim_low = np.min(linebuilder.ys[linebuilder.ys != 0]) - 40 # noqa: ignore=F821
-                ylim_low = ylim_low if ylim_low > 0 else 0  # noqa: ignore=F821
-                ylim_upp = np.max(linebuilder.ys[linebuilder.ys != 0]) + 10 # noqa: ignore=F821
-                ylim_upp = ylim_upp if ylim_upp < im_grad.shape[0] else im_grad.shape[0]  # noqa: ignore=F821
-
-                xlim_left = np.min(linebuilder.xs[linebuilder.xs != 0]) - 40 # noqa: ignore=F821
-                xlim_left = xlim_left if xlim_left > 0 else 0  # noqa: ignore=F821
-                xlim_right = np.max(linebuilder.xs[linebuilder.xs != 0]) + 40 # noqa: ignore=F821
-                xlim_right = xlim_right if xlim_right < im_grad.shape[1] else im_grad.shape[1]  # noqa: ignore=F821
-
-                ax2.set_xlim([xlim_left, xlim_right])
-                ax2.set_ylim([ylim_upp, ylim_low])
-
-                ax3.set_xlim([xlim_left, xlim_right])
-                ax3.set_ylim([ylim_upp, ylim_low])
-
-                ax4.set_xlim([xlim_left, xlim_right])
-                ax4.set_ylim([ylim_upp, ylim_low])
-
-            linebuilder = lb.SplineBuilder(ax1, ax2, ax3, ax4)
-            plt.tight_layout()
             plt.show()
 
-            points[n, linebuilder.xs] = linebuilder.ys
-            interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
+            # load data and save them
+            # -------------
+            front = frontTracker.get_front()
+            pt = frontTracker.get_tracked_points()
+            np.save(self.path + 'result/front', front)
+            np.save(self.path + 'result/front_pt', pt)
 
-        # get geometry image time_ref
-        fig = plt.figure(figsize=(20, 10))
-        fig.canvas.set_window_title('Image {}/{}'.format(
-                n, self.n_image_tot+1
-            )
-        )
-        ax1 = plt.subplot(1, 2, 1)
-        ax2 = plt.subplot(1, 2, 2)
+        if not self.front.isEmpty():
+            print("There's already a front detected,")
+            print("Do you want to overwrite it ? (y/n)")
+            a = input()
 
-        self.read_image(time_ref)
-        im = self.current_image.rotate(-ref_pente)
-        ax1.imshow(im, cmap='gray')
-        ax1.axis('off')
-
-        self.read_image(time_end)
-        im = self.current_image.rotate(-ref_pente)
-        ax2.imshow(im, cmap='gray')
-        ax2.axis('off')
-
-        g = geom.Geometry(ax1, ax2, im.shape[0], im.shape[1])
-        plt.tight_layout()
-        plt.show()
-
-        rc_l = g.rc_left_pos
-        rc_r = g.rc_right_pos
-        z0 = g.z0_pos
-        zc = g.zc_pos
-        print(rc_l, rc_r, z0, zc)
-
-        rc_l = int(g.rc_left_pos)
-        rc_r = int(g.rc_right_pos)
-        rc = int(g.rc_pos)
-        z0 = int(g.z0_pos)
-        zc = int(g.zc_pos)
-        zf = int(g.zf_pos)
-        print(rc_l, rc_r, z0, zc)
-
-        # create mask
-        mask = im.copy()
-        mask *= 0
-        interpolation[interpolation == 0] = np.nan
-        for r in range(rc_l, rc_r):
-            if not np.isnan(np.nanmin(interpolation[:, r])):
-                for z in range(
-                    int(np.nanmin(interpolation[:, r]))-3,
-                    int(np.nanmax(interpolation[:, r]))+3
-                ):
-                    mask[z, r] = 1
-
-        plt.figure()
-        plt.imshow(mask, cmap='gray')
-        plt.show()
-
-        for t in range(time_ref, time_end):
-            self.read_image(t)
-            im = self.current_image.rotate(-ref_pente)
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'same')
-            im_phi = self.current_image.gradient(5, 'sobel', 'arg', 'same')
-            im_grad2 = self.current_image.gradient(5, 'sobel', 'mag', 'same', im_phi)
-
-            # thres = np.median(im_grad) + .3*np.std(im_grad)
-
-            # im_grad[im_grad < thres] = 0
-
-            im_grad *= mask
-            im_grad = np.ones_like(im_grad) - im_grad
-            left = im_grad[:, :rc]
-            right = im_grad[:, :rc:-1]
-            if t == time_ref:
-                plt.figure(figsize=[8, 4.5])
-                plt.subplot(2,2,1)
-                plt.imshow(left, cmap='gray')
-
-                plt.subplot(2,2,2)
-                plt.imshow(right, cmap='gray')
-
-                plt.subplot(2,2,3)
-                plt.imshow(im_phi*mask, cmap='gray')
-
-                plt.subplot(2,2,4)
-                plt.imshow(im_grad2*mask, cmap='gray')
-
-            r_left = np.zeros(left.shape[0])
-            r_right = np.zeros(left.shape[0])
-            for z in range(0, left.shape[0]):
-                c_l = np.argmin(left[z, :])
-                if c_l > 0:
-                    r_left[z] = c_l
-                c_r = np.argmin(right[z, :])
-                if c_r > 0:
-                    r_right[z] = im_grad.shape[1] - c_r
-
-            c_z = np.zeros(im_grad.shape[1])
-            for r in range(rc_l, rc_r, 1):
-                c = np.argmin(im_grad[:, r])
-                if c > 0:
-                    c_z[r] = c
-
-            Cr_left[t, range(left.shape[0])] = r_left
-            Cr_right[t, range(left.shape[0])] = r_right
-            Cz[t, range(im_grad.shape[1])] = c_z
-
-        self.read_image(time_ref+7)
-        plt.figure(figsize=[8, 4.5])
-        plt.imshow(self.current_image.image, cmap='gray')
-        plt.plot(Cr_left[time_ref+7, :], range(0, left.shape[0]), '.c', ms=1)
-        plt.plot(Cr_right[time_ref+7, :], range(0, right.shape[0]), '.m', ms=1)
-        plt.plot(range(0, im_grad.shape[1]), Cz[time_ref+7, :], '.y', ms=1)
-        plt.show()
-
-        if not os.path.isdir(self.data_directory + folder_name):
-            os.makedirs(self.data_directory + folder_name)
-
-        if not os.path.isfile(self.data_directory + 'points.npy'):
-            np.save(
-                self.data_directory + folder_name + '/contour',
-                Cr_left
-            )
-            np.save(
-                self.data_directory + folder_name + '/interpolation',
-                interpolation
-            )
-            np.save(
-                self.data_directory + folder_name + '/points',
-                points
-            )
+            while True:
+                if a == 'y':  # on réécrit dessus
+                    front_pt = np.load(
+                        self.path + 'result/front_pt.npy', allow_pickle=True
+                    )
+                    set_front(
+                        point=front_pt
+                    )
+                    break
+                elif a == 'n':   # on le garde tel quel
+                    break
+                else:
+                    print("y or n are expected as answer")
+                    a = input()
         else:
-            answer = input(
-                'Do you want to overwrite previous results ? [y/n] '
-            )
-            if answer.lower() in ['y', 'yes']:
-                os.remove(
-                    self.data_directory + folder_name + '/interpolation.npy'
-                )
-                np.save(
-                    self.data_directory + folder_name + 'interpolation',
-                    interpolation
-                )
-                os.remove(
-                    self.data_directory + folder_name + 'points.npy'
-                )
-                np.save(self.data_directory + folder_name + 'points', points)
-                os.remove(
-                    self.data_directory + folder_name + 'contour.npy'
-                )
-                np.save(self.data_directory + folder_name + 'contour', Cr_left)
-
-        self.read_image(temp)
-
-        return Cr_left, points, interpolation
-
-    def contour_tracker2(self, folder_name='sa_contour', pts=[]):
-        """Semi-automatic contour detection.
-
-        Steps:
-        -------
-        1. Get Geometry (rc_left, rc_right, rc, zc, z0, zf)
-        2. Manual detect contour for time_nuc-1, time_nuc, time_end
-            Preplace point of intersection rc_left, rc_right, z0 etc..
-            Make a polyfit of 3rd order on left and right part.
-        3.
-
-        """
-        temp = self.current_image_number
-
-        interpolation = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        points = np.zeros(
-            (self.n_image_tot, self.current_image.size[1])
-        )
-        r_space = range(0,  self.current_image.size[1])
-
-        time_ref = int(self.datas.iloc[0]['t_ref_calc'])
-        # time to start detection
-        time_end = int(self.datas.iloc[0]['t_end_calc'])
-        time_nuc = int(self.datas.iloc[0]['t_nuc_calc'])
-        # time to end detection
-
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-        # substrate inclination
-
-        """
-        1. get geometry
-        """
-        fig = plt.figure(figsize=(20, 10))
-        fig.canvas.set_window_title('time_ref and time_end images')
-        ax1 = plt.subplot(1, 2, 1)
-        ax2 = plt.subplot(1, 2, 2)
-
-        self.read_image(time_ref)
-        im = self.current_image.rotate(-ref_pente)
-        ax1.imshow(im, cmap='gray')
-        ax1.axis('off')
-
-        self.read_image(time_end)
-        im = self.current_image.rotate(-ref_pente)
-        ax2.imshow(im, cmap='gray')
-        ax2.axis('off')
-
-        g = geom.Geometry(ax1, ax2, im.shape[0], im.shape[1])
-        plt.tight_layout()
-        plt.show()
-
-        rc_l = int(g.rc_left_pos)
-        rc_r = int(g.rc_right_pos)
-        rc = int(g.rc_pos)
-        z0 = int(g.z0_pos)
-        zc = int(g.zc_pos)
-        zf = int(g.zf_pos)
-
-        """
-        2. Compute volume
-        """
-        im_list = [time_nuc-1, time_nuc, time_end]
-        im_list = range(time_nuc-1, time_end)
-        Cr_l = np.zeros(
-            (self.n_image_tot, self.current_image.size[0])
-        )
-        Cr_r = np.zeros(
-            (self.n_image_tot, self.current_image.size[0])
-        )
-        top_pt = np.zeros(self.n_image_tot)
-        Volume = np.zeros(self.n_image_tot)
-        for n in im_list:
-            self.read_image(n)
-            im = self.current_image.rotate(-ref_pente)
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'valid')
-            fig = plt.figure(figsize=(20, 10))
-            fig.canvas.set_window_title('Image {}/{}'.format(
-                    time_nuc, self.n_image_tot+1
-                )
-            )
-
-            ax1 = plt.subplot(1, 2, 1)
-            ax1.imshow(im, cmap='gray')
-            ax1.axis('off')
-            ax1.set_title('Original image')
-
-            ax2 = plt.subplot(1, 2, 2)
-            ax2.imshow(im_grad, cmap='gray')
-            ax2.axis('off')
-            ax2.set_title('Gradient magnitude')
-
-            geom_data = [rc_l, rc_r, rc, zc, z0, zf]
-            linebuilder = lb.ContourLineBuilder(ax1, ax2, geom_data)
-            plt.tight_layout()
-            plt.show()
-
-            cr_l = np.array(linebuilder.ax1_left_line.get_xdata(), dtype=np.int)
-            cz_l = np.array(linebuilder.ax1_left_line.get_ydata(), dtype=np.int)
-            Cr_l[n, cz_l] = cr_l
-            cr_r = np.array(linebuilder.ax1_right_line.get_xdata(), dtype=np.int)
-            cz_r = np.array(linebuilder.ax1_right_line.get_ydata(), dtype=np.int)
-            Cr_r[n, cz_r] = cr_r
-            top_pt[n] = np.array(linebuilder.ax1_top_pt.get_ydata(), dtype=np.int)
-
-            # volume calculation
-            for i in range(self.current_image.size[0]):
-                if Cr_l[n, i] != 0:
-                    Volume[n] += (rc - Cr_l[n, i])**2
-                if Cr_r[n, i] != 0:
-                    Volume[n] += (Cr_r[n, i] - rc)**2
-
-        dz_nuc = top_pt[time_nuc] - top_pt[time_nuc-1]
-        dz_tot = top_pt[time_end] - top_pt[time_nuc-1]
-
-        V0 = 0
-        Vnuc = 0
-        Vend = 0
-        for i in range(self.current_image.size[0]):
-            if Cr_l[time_nuc-1, i] != 0:
-                V0 += (rc - Cr_l[time_nuc-1, i])**2
-            if Cr_r[time_nuc-1, i] != 0:
-                V0 += (Cr_r[time_nuc-1, i] - rc)**2
-
-            if Cr_l[time_nuc, i] != 0:
-                Vnuc += (rc - Cr_l[time_nuc, i])**2
-            if Cr_r[time_nuc, i] != 0:
-                Vnuc += (Cr_r[time_nuc, i] - rc)**2
-
-            if Cr_l[time_end, i] != 0:
-                Vend += (rc - Cr_l[time_end, i])**2
-            if Cr_r[time_end, i] != 0:
-                Vend += (Cr_r[time_end, i] - rc)**2
-
-        V0 *= np.pi/2
-        Vnuc *= np.pi/2
-        Vend *= np.pi/2
-
-        dV_nuc = Vnuc - V0
-        dV_tot = Vend - V0
-
-        print('dz_nuc : ', dz_nuc)
-        print('dz_tot_geom', zf-z0)
-        print('dz_tot : ', dz_tot)
-
-        print('V0 :', V0)
-        print('Vnuc :', Vnuc)
-        print('Vend :', Vend)
-        print('dV_nuc : ', dV_nuc)
-        print('dV_tot : ', dV_tot)
-
-        a_z = (998*top_pt[time_nuc-1]/top_pt[time_nuc] - 998) / (916-998)
-        a_V = (998*V0/Vnuc - 998) / (916-998)
-
-        print('alpha_z :', a_z)
-        print('alpha_volume :', a_V)
-
-        plt.figure(figsize=[8, 4.5])
-        plt.plot(range(self.n_image_tot), Volume, '.b')
-        # points[n, linebuilder.xs] = linebuilder.ys
-        # interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
-
-        """
-        for n in im_list:
-            self.read_image(n)
-            im = self.current_image.rotate(-ref_pente)
-
-            # time gradient image ax3
-            if n < self.n_image_tot+1 and n > 0:
-
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = (2*im - im_b - im_a)/2
-
-            elif n == 0:
-                self.read_image(n+1)
-                im_a = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im_a - im
-
-            elif n == self.n_image_tot:
-                self.read_image(n-1)
-                im_b = np.array(self.current_image.rotate(-ref_pente))
-                im_time = im - im_b
-
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'valid')
-            im_grady = self.current_image.gradient(5, 'sobel', 'y', 'valid')
-            im_grad = self.current_image.rotate(-ref_pente, im_grad)
-
-            fig = plt.figure(figsize=(20, 10))
-            fig.canvas.set_window_title('Image {}/{}'.format(
-                    n, self.n_image_tot+1
-                )
-            )
-            ax1 = plt.subplot(2, 2, 1)
-            ax1.imshow(im, cmap='gray')
-            ax1.axis('off')
-            ax1.set_title('Original image')
-
-            ax2 = plt.subplot(2, 2, 2)
-            ax2.imshow(im_grad, cmap='gray')
-            ax2.axis('off')
-            ax2.set_title('Gradient magnitude')
-
-            ax3 = plt.subplot(2, 2, 3)
-            ax3.imshow(im_time, cmap='gray')
-            ax3.axis('off')
-            ax3.set_title('Time gradient')
-
-            ax4 = plt.subplot(2, 2, 4)
-            ax4.imshow(im_grady, cmap='gray')
-            ax4.axis('off')
-            ax4.set_title('y-Gradient')
-
-            if n > time_ref:
-                # plot previous line
-                ax1.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax2.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax3.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-                ax4.plot(
-                    r_space, interpolation[n-1, :],
-                    '-r', alpha=.3
-                )
-
-                # plot previous point
-                ax1.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax2.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax3.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-                ax4.plot(
-                    r_space, points[n-1, :],
-                    'or', alpha=.3, ms=4,
-                )
-
-                ylim_low = np.min(linebuilder.ys[linebuilder.ys != 0]) - 40 # noqa: ignore=F821
-                ylim_low = ylim_low if ylim_low > 0 else 0  # noqa: ignore=F821
-                ylim_upp = np.max(linebuilder.ys[linebuilder.ys != 0]) + 10 # noqa: ignore=F821
-                ylim_upp = ylim_upp if ylim_upp < im_grad.shape[0] else im_grad.shape[0]  # noqa: ignore=F821
-
-                xlim_left = np.min(linebuilder.xs[linebuilder.xs != 0]) - 40 # noqa: ignore=F821
-                xlim_left = xlim_left if xlim_left > 0 else 0  # noqa: ignore=F821
-                xlim_right = np.max(linebuilder.xs[linebuilder.xs != 0]) + 40 # noqa: ignore=F821
-                xlim_right = xlim_right if xlim_right < im_grad.shape[1] else im_grad.shape[1]  # noqa: ignore=F821
-
-                ax2.set_xlim([xlim_left, xlim_right])
-                ax2.set_ylim([ylim_upp, ylim_low])
-
-                ax3.set_xlim([xlim_left, xlim_right])
-                ax3.set_ylim([ylim_upp, ylim_low])
-
-                ax4.set_xlim([xlim_left, xlim_right])
-                ax4.set_ylim([ylim_upp, ylim_low])
-
-            linebuilder = lb.SplineBuilder(ax1, ax2, ax3, ax4)
-            plt.tight_layout()
-            plt.show()
-
-            points[n, linebuilder.xs] = linebuilder.ys
-            interpolation[n, linebuilder.xs_interp] = linebuilder.ys_interp
-        """
-
-        """ old contour detection
-
-        # get geometry image time_ref
-        fig = plt.figure(figsize=(20, 10))
-        fig.canvas.set_window_title('Image {}/{}'.format(
-                n, self.n_image_tot+1
-            )
-        )
-        ax1 = plt.subplot(1, 2, 1)
-        ax2 = plt.subplot(1, 2, 2)
-
-        self.read_image(time_ref)
-        im = self.current_image.rotate(-ref_pente)
-        ax1.imshow(im, cmap='gray')
-        ax1.axis('off')
-
-        self.read_image(time_end)
-        im = self.current_image.rotate(-ref_pente)
-        ax2.imshow(im, cmap='gray')
-        ax2.axis('off')
-
-        g = geom.Geometry(ax1, ax2, im.shape[0], im.shape[1])
-        plt.tight_layout()
-        plt.show()
-
-        rc_l = int(g.rc_left_pos)
-        rc_r = int(g.rc_right_pos)
-        rc = int(g.rc_pos)
-        z0 = int(g.z0_pos)
-        zc = int(g.zc_pos)
-        zf = int(g.zf_pos)
-        print(rc_l, rc_r, z0, zc)
-
-        # create mask
-        mask = im.copy()
-        mask *= 0
-        interpolation[interpolation == 0] = np.nan
-        for r in range(rc_l, rc_r):
-            if not np.isnan(np.nanmin(interpolation[:, r])):
-                for z in range(
-                    int(np.nanmin(interpolation[:, r]))-3,
-                    int(np.nanmax(interpolation[:, r]))+3
-                ):
-                    mask[z, r] = 1
-
-        plt.figure()
-        plt.imshow(mask, cmap='gray')
-        plt.show()
-
-        for t in range(time_ref, time_end):
-            self.read_image(t)
-            im = self.current_image.rotate(-ref_pente)
-            im_grad = self.current_image.gradient(5, 'sobel', 'mag', 'same')
-
-            # thres = np.median(im_grad) + .3*np.std(im_grad)
-
-            # im_grad[im_grad < thres] = 0
-
-            im_grad *= mask
-
-            left = im_grad[:, :rc]
-            right = im_grad[:, rc:]
-            if t == time_ref:
-                plt.figure(figsize=[8, 4.5])
-                plt.subplot(1,2,1)
-                plt.imshow(left)
-
-                plt.subplot(1,2,2)
-                plt.imshow(right)
-
-            r_left = np.zeros(left.shape[0])
-            r_right = np.zeros(left.shape[0])
-            for z in range(0, left.shape[0]):
-                c_l = np.argmax(left[z, :])
-                if c_l > 0:
-                    r_left[z] = c_l
-                c_r = np.argmax(right[z, :])
-                if c_r > 0:
-                    r_right[z] = rc + c_r
-
-            Cr_left[t, range(left.shape[0])] = r_left
-            Cr_right[t, range(left.shape[0])] = r_right
-
-        self.read_image(time_ref+7)
-        plt.figure(figsize=[8, 4.5])
-        plt.imshow(self.current_image.image, cmap='gray')
-        plt.plot(Cr_left[time_ref+7, :], range(0, left.shape[0]), '.c', ms=1)
-        plt.plot(Cr_right[time_ref+7, :], range(0, right.shape[0]), '.m', ms=1)
-        plt.show()
-        """
-
-        if not os.path.isdir(self.data_directory + folder_name):
-            os.makedirs(self.data_directory + folder_name)
-
-        if not os.path.isfile(self.data_directory + 'volume.npy'):
-            np.save(
-                self.data_directory + folder_name + '/volume',
-                Volume
-            )
-            np.save(
-                self.data_directory + folder_name + '/Cr_left',
-                Cr_l
-            )
-            np.save(
-                self.data_directory + folder_name + '/Cr_right',
-                Cr_r
-            )
-        else:
-            answer = input(
-                'Do you want to overwrite previous results ? [y/n] '
-            )
-            if answer.lower() in ['y', 'yes']:
-                os.remove(
-                    self.data_directory + folder_name + '/interpolation.npy'
-                )
-                np.save(
-                    self.data_directory + folder_name + 'interpolation',
-                    interpolation
-                )
-                os.remove(
-                    self.data_directory + folder_name + 'points.npy'
-                )
-                np.save(self.data_directory + folder_name + 'points', points)
-                os.remove(
-                    self.data_directory + folder_name + 'contour.npy'
-                )
-                np.save(self.data_directory + folder_name + 'contour', Cr_r)
-
-        self.read_image(temp)
-
-        # return Cr_left, points, interpolation
+            set_front()
 
     def view_all_profil(self, zf, n_space):
         """Plot front dynamic and propagation."""
@@ -2977,4 +2367,10 @@ if __name__ == '__main__':
     stack.get_geometry_by_rectangle()
 
     # tracking drop geom/contour & front
-    stack.tracker()
+    stack.track_geometry()
+    stack.track_contour()
+    stack.track_front()
+
+    stack.contour.plot()
+    stack.contour.plot_volume()
+    stack.front.plot()

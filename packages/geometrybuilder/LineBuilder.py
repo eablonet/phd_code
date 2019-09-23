@@ -1684,12 +1684,12 @@ class SpatioContourTrack(object):
         self.image = image
         self.t_nuc = data['t_nuc']
         self.t_end = data['t_end']
-        self.z0 = data['geom']['z0']
-        self.zf = data['geom']['zf']
-        self.zb = data['geom']['zb']
-        self.rr = data['geom']['rr']
-        self.rl = data['geom']['rl']
-        self.rc = data['geom']['rc']
+        self.z0 = data['geom'].z0
+        self.zf = data['geom'].zf
+        self.zb = data['geom'].zb
+        self.rr = data['geom'].rr
+        self.rl = data['geom'].rl
+        self.rc = data['geom'].rc
         self.image_t = [
             self.t_nuc,
             int((self.t_nuc+self.t_end)/2),
@@ -1744,7 +1744,7 @@ class SpatioContourTrack(object):
         """Define the main figure."""
         # declare main figure
         # ------------
-        self.main_fig = plt.figure(figsize=(16, 12))
+        self.main_fig = plt.figure(figsize=(16, 9))
         self.main_fig.canvas.set_window_title(
             'Contour detection thanks to spatio'
         )
@@ -2234,7 +2234,7 @@ class SpatioContourTrack(object):
 class SpatioFrontTrack(object):
     """Track the contour thanks to spatio."""
 
-    def __init__(self, spatio, image, data, contour):
+    def __init__(self, spatio, image, data, contour, front_pt):
         """Init the class."""
         # store data
         # ---------
@@ -2246,33 +2246,53 @@ class SpatioFrontTrack(object):
         self.t_nuc = data['t_nuc']
         self.t_end = data['t_end']
         self.image_t = [
-            self.t_nuc,
+            self.t_nuc+10,
             int((self.t_nuc + self.t_end)/2),
-            self.t_end
+            self.t_end-10
         ]
 
         # geometry
         # --------
-        self.z0 = data['geom']['z0']
-        self.zf = data['geom']['zf']
-        self.zb = data['geom']['zb']
-        self.rr = data['geom']['rr']
-        self.rl = data['geom']['rl']
-        self.rc = data['geom']['rc']
+        self.z0 = data['geom'].z0
+        self.zf = data['geom'].zf
+        self.zb = data['geom'].zb
+        self.rr = data['geom'].rr
+        self.rl = data['geom'].rl
+        self.rc = data['geom'].rc
         self.range_r = data['range_r']
+        self.dz = self.zf - 10
+        self.dz = self.dz if self.dz > 0 else 0
 
         # contour
         # -------
-        self.xc_l = contour[0]
-        self.yc_l = contour[1]
-        self.xc_r = contour[2]
-        self.yc_r = contour[3]
+        self.xc_l = contour.xl
+        self.yc_l = contour.yl
+        self.xc_r = contour.xr
+        self.yc_r = contour.yr
 
         # init values
         # -----------
         self.curves = []
+        self.tf = []
         for i in range(5):
             self.curves.append(Point())
+            if front_pt is not None:
+                for j in range(len(front_pt[i])):
+                    self.curves[i].add_point(*front_pt[i][j])
+                self.curves[i].set_selected_by_location(
+                    *front_pt[i][0]
+                )
+                log(front_pt[i][:])
+                tf = int(np.max([j[0] for j in front_pt[i][:]]))
+                log(tf)
+                self.tf.append(tf)
+            else:
+                self.curves[i].add_point(self.t_nuc, self.zb-self.dz)
+                self.curves[i].set_selected_by_location(
+                    self.t_nuc, self.zb-self.dz
+                )
+                self.tf.append(None)
+        log(self.tf)
         self.n_selected_ax = 0
         self.press_key = None
 
@@ -2296,7 +2316,7 @@ class SpatioFrontTrack(object):
         """Define the main figure."""
         # declare main figure
         # ------------
-        self.main_fig = plt.figure(figsize=(16, 12))
+        self.main_fig = plt.figure(figsize=(16, 9))
         self.main_fig.canvas.set_window_title(
             'Contour detection thanks to spatio'
         )
@@ -2315,129 +2335,99 @@ class SpatioFrontTrack(object):
             r'Image at $t=t_{tot}$',
             r'0 : $\frac{r}{r_0} = -\frac{2}{3}$'
         ]
-        txt_save = [
-            r'1 : $\frac{r}{r_0} = -\frac{1}{3}$',
-            r'2 : $\frac{r}{r_0} = 0$',
-            r'3 : $\frac{r}{r_0} = \frac{1}{3}$',
-            r'4 : $\frac{r}{r_0} = \frac{2}{3}$',
-        ]
-        self.main_ax = []
-        for i in range(9):
-            self.main_ax.append(plt.subplot(3, 3, i+1))
-            self.main_ax[i].set_title(txt[i])
 
-        # color selected axe
-        # ----------
-        for spine in self.main_ax[0].spines.values():
-            spine.set_color('tab:red')
-            spine.set_linewidth(2)
+        self.main_ax = [
+            plt.subplot2grid((3, 3), (0, 0)),
+            plt.subplot2grid((3, 3), (1, 0)),
+            plt.subplot2grid((3, 3), (2, 0)),
+            plt.subplot2grid((3, 3), (0, 1), colspan=2, rowspan=3)
+        ]
+        for i in range(4):
+            self.main_ax[i].set_title(txt[i])
 
         # show spatio and image
         # --------------
-        top = self.zf - 10
-        top = top if top > 0 else 0
-        self.dz = top
         bottom = self.zb + 10
         bottom = bottom if (
-            bottom < self.image.get_height()
-        ) else self.image.get_height()
-        for i in range(5):
-            self.main_ax[i].imshow(
-                self.spatio[i][top:bottom, :], cmap='pink'
-            )
-            self.curves[i].add_point(self.t_nuc, self.zb-self.dz)
-            self.curves[i].set_selected_by_location(
-                self.t_nuc, self.zb-self.dz
-            )
+            bottom < self.image[0].get_height()
+        ) else self.image[0].get_height()
 
-        self.main_ax[6].imshow(self.image[0].get_image(), cmap='pink')
-        self.main_ax[7].imshow(self.image[1].get_image(), cmap='pink')
-        self.main_ax[8].imshow(self.image[2].get_image(), cmap='pink')
-
-        # guidelines
-        # ----------
-        self.main_guidLines = []
-        for i in range(5):
-            self.main_guidLines.append([])
-            for k in range(4):
-                self.main_guidLines[i].append(
-                    self.main_ax[i].plot(
-                        [], [],
-                        ls='-.', marker='None',
-                        color='tab:orange', alpha=.3
-                    )[0]
-                )
-
-        # plot contour on images
-        # --------------
-        self.main_ax[6].plot(self.xc_l[0], self.yc_l[0], '--r', lw=2)
-        self.main_ax[6].plot(self.xc_r[0], self.yc_r[0], '--g', lw=2)
+        self.main_ax[3].imshow(
+            self.spatio[self.n_selected_ax][self.dz:bottom, :], cmap='pink'
+        )
+        self.main_ax[0].imshow(self.image[0].get_image(), cmap='pink')
+        self.main_ax[1].imshow(self.image[1].get_image(), cmap='pink')
+        self.main_ax[2].imshow(self.image[2].get_image(), cmap='pink')
 
         # start point, other point
         # ------------
-        self.main_startDot = []
-        self.main_point = []
-        for i in range(5):
-            x, y = self.curves[i].get_sort_point()
-            self.main_startDot.append(
-                self.main_ax[i].plot(
-                    x[0], y[0],  # dz to correct the crop
-                    ls='none', marker='x',
-                    mec='tab:green', mfc='none',
-                    ms=6, alpha=1
-                )[0]
-            )
-            self.main_point.append(
-                self.main_ax[i].plot(
-                    [], [],
-                    ls='none', marker='x',
-                    mec='tab:orange', mfc='none',
-                    ms=6, alpha=1
-                )[0]
-            )
+        x, y = self.curves[0].get_sort_point()
+        self.main_startDot = self.main_ax[3].plot(
+            x[0], y[0],  # dz to correct the crop
+            ls='none', marker='x',
+            mec='tab:green', mfc='none',
+            ms=6, alpha=1
+        )[0]
+        self.main_startLine = self.main_ax[3].plot(
+            [x[0], x[0]],
+            [0, self.zb-self.zf+20],
+            ls='-.', marker='None',
+            c='tab:green',
+            alpha=.5
+        )[0]
+        self.main_bottomLine = self.main_ax[3].plot(
+            [0, self.spatio[0].shape[1]],
+            [y[0], y[0]],
+            ls='-.', marker='None',
+            c='tab:green',
+            alpha=.5
+        )[0]
+
+        self.main_point = self.main_ax[3].plot(
+            x[1:-1], y[1:-1],
+            ls='none', marker='x',
+            mec='tab:orange', mfc='none',
+            ms=6, alpha=1
+        )[0]
 
         # final solidification point
         # -------------------
-        self.main_finalDot = []
-        self.main_finalLine = []
-        self.tf = [None]*5
-        for i in range(5):
-            x, y = self.curves[i].get_interpolation()
-            self.main_finalDot.append(
-                self.main_ax[i].plot(
-                    [], [],
-                    ls='none', marker='x',
-                    mec='tab:red', mfc='tab:red',
-                    ms=4, alpha=1
-                )[0]
-            )
-            self.main_finalLine.append(
-                self.main_ax[i].plot(
-                    [], [],
-                    ls='-.', marker='None',
-                    c='tab:red',
-                    alpha=.3
-                )[0]
-            )
+        self.main_finalDot = self.main_ax[3].plot(
+            x[-1], y[-1],
+            ls='none', marker='x',
+            mec='tab:red', mfc='tab:red',
+            ms=4, alpha=1
+        )[0]
+
+        self.main_finalLine = self.main_ax[3].plot(
+            [x[-1], x[-1]],
+            [0, self.zb-self.zf+20],
+            ls='-.', marker='None',
+            c='tab:blue',
+            alpha=.5
+        )[0]
+        self.main_topLine = self.main_ax[3].plot(
+            [0, self.spatio[0].shape[1]],
+            [y[-1], y[-1]],
+            ls='-.', marker='None',
+            c='tab:blue',
+            alpha=.5
+        )[0]
 
         # interpolated lines
         # -----------------
-        self.main_interpolatedLines = []
-        for i in range(5):
-            x, y = self.curves[i].get_interpolation()
-            self.main_interpolatedLines.append(
-                self.main_ax[i].plot(
-                    x, y,
-                    ls='-.', marker='None',
-                    c='tab:blue', alpha=.3,
-                )[0]
-            )
+        x, y = self.curves[0].get_interpolation()
+        self.main_interpolatedLines = self.main_ax[3].plot(
+            x, y,
+            ls='-.', marker='None',
+            c='tab:blue', alpha=.3,
+        )[0]
 
         # front line/dot in image
         # ----------------
         self.main_frontLine = []
         self.main_frontPoint = []
-        for i in range(6, 9):
+        for i in range(3):
             self.main_frontLine.append(
                 self.main_ax[i].plot(
                     [], [],
@@ -2454,76 +2444,107 @@ class SpatioFrontTrack(object):
                 )[0]
             )
 
-        # init plot for volume
-        # -------------------
-        self.main_volPlot = self.main_ax[5].plot(
-            [], [],
-            ls='-.', marker='s', markevery=20,
-            color='tab:blue',
-            label=r'Volume $(V/V_0)$',
-        )[0]
-        self.main_heightPlot = self.main_ax[5].plot(
-            [], [],
-            ls='-.', marker='^', markevery=20,
-            color='tab:red',
-            label=r'Height $(h/h_0)$',
-        )[0]
-        self.main_ax[5].grid(True)
-        self.main_ax[5].set_xlim(0, self.t_end+1-self.t_nuc)
-        self.main_ax[5].set_ylim(1, 1.1*(self.zb-self.zf)/(self.zb-self.z0))
-
     def update_fig(self):
         """Update figure."""
         # display new dots
         # ----------------
         x, y = self.curves[self.n_selected_ax].get_sort_point()
-        self.main_startDot[self.n_selected_ax].set_data(
+        self.main_startDot.set_data(
             x[0], y[0]
         )
-        self.main_point[self.n_selected_ax].set_data(
+        self.main_point.set_data(
             x[1:-1], y[1:-1]
         )
         self.tf[self.n_selected_ax] = x[-1]
-        self.main_finalDot[self.n_selected_ax].set_data(
+        self.main_finalDot.set_data(
             x[-1], y[-1]
         )
 
         # display interpolation
         # --------------------
         x, y = self.curves[self.n_selected_ax].get_interpolation()
-        self.main_interpolatedLines[self.n_selected_ax].set_data(x, y)
-        self.main_finalLine[self.n_selected_ax].set_data(
-            [x[-1], x[-1]],
-            [0, self.zb-self.zf+20]
-        )
+        self.main_interpolatedLines.set_data(x, y)
 
+        # updta guidelines
+        x, y = self.curves[self.n_selected_ax].get_sort_point()
+        self.main_startLine.set_xdata(
+            [x[0], x[0]]
+        )
+        self.main_finalLine.set_xdata(
+            [x[-1], x[-1]]
+        )
+        self.main_bottomLine.set_ydata(
+            [y[0], y[0]]
+        )
+        self.main_topLine.set_ydata(
+            [y[-1], y[-1]]
+        )
 
         # draw figure
         # -----------
         self.main_fig.canvas.draw()
 
-    def _ax_change(self, ax):
-        for spine in self.main_ax[self.n_selected_ax].spines.values():
-            spine.set_color('k')
-            spine.set_linewidth(1)
-        for i in range(5):
-            if self.main_ax[i] == ax:
-                self.n_selected_ax = i
-        for spine in self.main_ax[self.n_selected_ax].spines.values():
-            spine.set_color('tab:red')
-            spine.set_linewidth(2)
+    def update_spatio(self):
+        """Update spatio image."""
+        txt = [
+            r'0 : $\frac{r}{r_0} = -\frac{2}{3}$',
+            r'1 : $\frac{r}{r_0} = -\frac{1}{3}$',
+            r'2 : $\frac{r}{r_0} = 0$',
+            r'3 : $\frac{r}{r_0} = \frac{1}{3}$',
+            r'4 : $\frac{r}{r_0} = \frac{2}{3}$',
+        ]
 
-        self.update_fig()
+        # show spatio and image
+        # --------------
+        bottom = self.zb + 10
+        bottom = bottom if (
+            bottom < self.image[0].get_height()
+        ) else self.image[0].get_height()
+
+        self.main_ax[3].imshow(
+            self.spatio[self.n_selected_ax][self.dz:bottom, :], cmap='pink'
+        )
+        self.main_ax[3].set_title(txt[self.n_selected_ax])
+
+        # start point, end point, other point
+        # ------------
+        x, y = self.curves[self.n_selected_ax].get_sort_point()
+        self.main_startDot.set_data(
+            x[0], y[0],  # dz to correct the crop
+        )
+        self.main_finalDot.set_data(
+            x[-1], y[-1],  # dz to correct the crop
+        )
+        self.main_point.set_data(
+            x[1:-1], y[1:-1]
+        )
+
+        # interpolated lines
+        # -----------------
+        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        self.main_interpolatedLines.set_data(
+            x, y,
+        )
+
+        # updta guidelines
+        # ---------------
+        self.main_startLine.set_xdata(
+            [x[0], x[0]]
+        )
+        self.main_finalLine.set_xdata(
+            [x[-1], x[-1]]
+        )
+        self.main_bottomLine.set_ydata(
+            [y[0], y[0]]
+        )
+        self.main_topLine.set_ydata(
+            [y[-1], y[-1]]
+        )
+        self.main_fig.canvas.draw()
 
     def on_release_mousse(self, event):
         """Click action on axes."""
-        if event.inaxes not in self.main_ax:
-            return
-
-        # Axe is changing
-        # ---------------
-        if self.main_ax[self.n_selected_ax] != event.inaxes:
-            self._ax_change(event.inaxes)
+        if event.inaxes != self.main_ax[3]:
             return
 
         # get click information
@@ -2600,85 +2621,97 @@ class SpatioFrontTrack(object):
             self.press_key = None
             return
 
-        # display / erase guidLine
-        # ---------------
-        if self.press_key == 'g':
-            t = [
-                [self.t_nuc, self.t_nuc],
-                [self.t_end, self.t_end],
-                [0, self.image.get_width()],
-                [0, self.image.get_width()]
-            ]
-            y = [
-                [0, self.image.get_height()],
-                [0, self.image.get_height()],
-            ]
-            for i in range(5):
-                _, pty = self.curves[i].get_sort_point()
-                y.append([pty[0], pty[0]])
-                y.append([pty[-1], pty[-1]])
-                for k in range(4):
-                    self.main_guidLines[i][k].set_data(t[k], y[k])
-
+        if self.press_key in ['n', 'p']:
+            if self.n_selected_ax in range(1, 4):
+                self.n_selected_ax += 1 if self.press_key == 'n' else -1
+            elif self.n_selected_ax == 0:
+                self.n_selected_ax = 1 if self.press_key == 'n' else 4
+            elif self.n_selected_ax == 4:
+                self.n_selected_ax = 0 if self.press_key == 'n' else 3
+            self.update_spatio()
             self.press_key = None
-            self.main_fig.canvas.draw()
             return
 
-        # plot volume over time
-        # --------------------
+        # front construction
+        # ------------------
         if self.press_key == 'c':
-            # update image figures
-            # -------------------
+            log("Construct Front")
+
             # contruct time front on the contour
             contourTimeCurve = Point()
 
+            t_nuc = []
             for i in range(5):
                 contourTimeCurve.add_point(self.range_r[i], int(self.tf[i]))
-            contourTimeCurve.add_point(self.rl, self.t_nuc,)
-            contourTimeCurve.add_point(self.rr, self.t_nuc)
+                t_nuc.append(self.curves[i].get_sort_point()[0][0])
+            t_nuc = int(np.mean(t_nuc))
+            contourTimeCurve.add_point(self.rl, t_nuc)
+            contourTimeCurve.add_point(self.rr, t_nuc)
 
             for k in range(3):  # loop on time of image
                 # get the contour interpolation
                 # -----------------
                 frontLine = Point()
-                xc, tc = contourTimeCurve.get_interpolation()
-                xc = [
-                    xc[i] for i in range(0, len(xc))
+                rc, tc = contourTimeCurve.get_interpolation()
+                rc = [
+                    rc[i] for i in range(0, len(rc))
                     if int(tc[i]) == self.image_t[k]
                 ]
 
+                log("rc found : ", rc)
+                log("For t = ", self.image_t[k])
+                log("max, min of tc", np.max(tc), np.min(tc))
+                log("(t_nuc, t_end) = ", self.t_nuc, self.t_end)
+
                 # Si on a les 2 intersections à l'interface
                 # -----------------
-                if len(xc) == 2:
+                if len(rc) > 1:
+                    # avoid doublon
+                    c = []
+                    for i in range(1, len(rc)):
+                        if rc[i] == rc[i-1]+1:
+                            c.append(i)
+                    for i in c[::-1]:
+                        del rc[i]
+
+                    if len(rc) > 2:
+                        log("Error, len(rc) > 2...")
+                        log(" rc = ", rc)
+                        log("For t = ", self.image_t[k])
+
                     for i in range(len(self.yc_l[self.image_t[k]-self.t_nuc])):
-                        if self.xc_l[self.image_t[k]-self.t_nuc][i] == xc[0]:
+                        if self.xc_l[self.image_t[k]-self.t_nuc][i] == rc[0]:
                             # xc_l = self.xc_l[self.image_t[k]-self.t_nuc][i]
                             yc_l = self.yc_l[self.image_t[k]-self.t_nuc][i]
                             break
 
                     for i in range(len(self.yc_r[self.image_t[k]-self.t_nuc])):
-                        if self.xc_r[self.image_t[k]-self.t_nuc][i] == xc[1]:
+                        if self.xc_r[self.image_t[k]-self.t_nuc][i] == rc[1]:
                             # xc_r = self.xc_r[self.image_t[k]-self.t_nuc][i]
                             yc_r = self.yc_r[self.image_t[k]-self.t_nuc][i]
                             break
-                    frontLine.add_point(xc[0], yc_l)
-                    frontLine.add_point(xc[1], yc_r)
+                    frontLine.add_point(rc[0], yc_l)
+                    frontLine.add_point(rc[1], yc_r)
 
-                    for i in range(5):
+                    for i in [0, 1, 3, 4]:  # range_r except 2 (center)
                         # on ne prend que les point pouvant appartenir au front
-                        if self.range_r[i] > xc[0] and self.range_r[i] < xc[1]:
+                        if self.range_r[i] > rc[0] and self.range_r[i] < rc[1]:
                             x, y = self.curves[i].get_interpolation()
                             y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                             # dz correct the crop of spatios
 
                             if (
                                 euclidian_dist(
-                                    self.range_r[i], y, xc[0], yc_l) > 15
+                                    self.range_r[i], y, rc[0], yc_l) > 5
                                 and euclidian_dist(
-                                    self.range_r[i], y, xc[1], yc_r) > 15
+                                    self.range_r[i], y, rc[1], yc_r) > 5
                             ):
-                            # min distance beetwenn point and contour
+                                # min distance beetwenn point and contour
                                 frontLine.add_point(self.range_r[i], y)
+                    # cas range_r == 2, center
+                    x, y = self.curves[2].get_interpolation()
+                    y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
+                    frontLine.add_point(self.range_r[2], y)
 
                     x, y = frontLine.get_interpolation()
                     self.main_frontLine[k].set_data(x, y)
@@ -2687,47 +2720,48 @@ class SpatioFrontTrack(object):
 
                 # Si on ne trouve qu'un seul point à l'interface
                 # ------------
-                elif len(xc) == 1:
-                    xc = xc[0]
-                    if xc < self.rc:
+                elif len(rc) == 1:
+                    log("There only one rc founded")
+                    rc = rc[0]
+                    if rc < self.rc:
                         for i in range(len(self.yc_l[self.image_t[k]-self.t_nuc])):
-                            if self.xc_l[self.image_t[k]-self.t_nuc][i] == xc:
+                            if self.xc_l[self.image_t[k]-self.t_nuc][i] == rc:
                                 # xc_l = self.xc_l[self.image_t[k]-self.t_nuc][i]
                                 yc_l = self.yc_l[self.image_t[k]-self.t_nuc][i]
                                 break
-                        frontLine.add_point(xc, yc_l)
+                        frontLine.add_point(rc, yc_l)
 
                         for i in range(5):
                             # on ne prend que les point pouvant appartenir au front
-                            if self.range_r[i] > xc and self.range_r[i] <= self.rc:
+                            if self.range_r[i] > rc and self.range_r[i] <= self.rc:
                                 x, y = self.curves[i].get_interpolation()
                                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                                 # dz correct the crop of spatios
                                 if (
                                     euclidian_dist(
-                                        self.range_r[i], y, xc, yc_l) > 15
+                                        self.range_r[i], y, rc, yc_l) > 15
                                 ):
                                     # min distance beetwenn point and contour
                                     frontLine.add_point(self.range_r[i], y)
 
                     else:
                         for i in range(len(self.yc_r[self.image_t[k]-self.t_nuc])):
-                            if self.xc_r[self.image_t[k]-self.t_nuc][i] == xc:
+                            if self.xc_r[self.image_t[k]-self.t_nuc][i] == rc:
                                 # xc_r = self.xc_r[self.image_t[k]-self.t_nuc][i]
                                 yc_r = self.yc_r[self.image_t[k]-self.t_nuc][i]
                                 break
 
-                        frontLine.add_point(xc, yc_r)
+                        frontLine.add_point(rc, yc_r)
 
                         for i in range(5):
                             # on ne prend que les point pouvant appartenir au front
-                            if self.range_r[i] >= self.rc and self.range_r[i] < xc:
+                            if self.range_r[i] >= self.rc and self.range_r[i] < rc:
                                 x, y = self.curves[i].get_interpolation()
                                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                                 # dz correct the crop of spatios
                                 if (
                                     euclidian_dist(
-                                        self.range_r[i], y, xc, yc_l) > 15
+                                        self.range_r[i], y, rc, yc_l) > 15
                                 ):
                                     # min distance beetwenn point and contour
                                     frontLine.add_point(self.range_r[i], y)
@@ -2737,10 +2771,14 @@ class SpatioFrontTrack(object):
                     x, y = frontLine.get_point()
                     self.main_frontPoint[k].set_data(x, y)
 
+                else:
+                    log("There is no rc founded")
+                    log("k = ", k)
             # redraw figure
             # ------------
             self.main_fig.canvas.draw()
             self.press_key = None
+            log("Front constructed")
             return
 
         # move start/final point
@@ -2774,67 +2812,118 @@ class SpatioFrontTrack(object):
 
         self.press_key = None
 
+    def get_tracked_points(self):
+        """Return point detected."""
+        pt = []
+        for i in range(5):
+            pt.append([])
+            for j in range(len(self.curves[i].x)):
+                pt[i].append([self.curves[i].x[j], self.curves[i].y[j]])
+        return pt
+
     def get_front(self):
         """Calculate the volume cross time."""
         x_front = []  # init vector volume
         y_front = []  # init vector volume
-        _, zc = self.curves[2].get_interpolation()
-        zc = self.zb - (zc + self.dz)
 
         # loop on contour to construct position front on contour
         # --------------
         # update image figures
         # -------------------
         # contruct time front on the contour
+        # contruct time front on the contour
         contourTimeCurve = Point()
 
+        t_nuc = []
         for i in range(5):
             contourTimeCurve.add_point(self.range_r[i], int(self.tf[i]))
-        contourTimeCurve.add_point(self.rl, self.t_nuc,)
+        contourTimeCurve.add_point(self.rl, self.t_nuc)
         contourTimeCurve.add_point(self.rr, self.t_nuc)
 
-        for t in range(self.t_end+1 - self.t_nuc):  # loop on time of image
+        # loop over time
+        # ----------
+        for k in range(self.t_end-self.t_nuc):
+            log("k = ", k)
+            log("t ?= ", k+self.t_nuc)
+
             # get the contour interpolation
             # -----------------
             frontLine = Point()
-            xc, tc = contourTimeCurve.get_interpolation()
-            xc = [
-                xc[i] for i in range(0, len(xc))
-                if int(tc[i]) == t
+            rc, tc = contourTimeCurve.get_interpolation()
+            rc = [
+                rc[i] for i in range(0, len(rc))
+                if int(tc[i]) == k + self.t_nuc  # t_real (frame)
             ]
 
             # Si on a les 2 intersections à l'interface
             # -----------------
-            if len(xc) == 2:
-                for i in range(len(self.yc_l[t-self.t_nuc])):
-                    if self.xc_l[t-self.t_nuc][i] == xc[0]:
-                        # xc_l = self.xc_l[self.image_t[k]-self.t_nuc][i]
-                        yc_l = self.yc_l[t-self.t_nuc][i]
+            if len(rc) > 1:
+                # avoid doublon
+                # ----------
+                # si deux nombre se suivent directement, on garde le premier
+                pos2del = []
+                for i in range(1, len(rc)):
+                    if rc[i] == rc[i-1]+1:
+                        pos2del.append(i)
+                for i in pos2del[::-1]:
+                    del rc[i]
+
+                # s'il reste plus de 2 pt... il y a un pb !
+                if len(rc) > 2:
+                    log("=========EROOOOOOOOOOOR=========")
+                    log("Error, len(rc) > 2...")
+                    log("rc found : ", rc)
+                    log("For t = ", self.t_nuc+k)
+                    log("\tFor k = ", k)
+                    log("(max, min) of tc : ", np.max(tc), np.min(tc))
+                    log("(t_nuc, t_end) sended : ", self.t_nuc, self.t_end)
+
+                for i in range(len(self.yc_l[k])):
+                    if self.xc_l[k][i] == rc[0]:
+                        # k car le contour est calculé depuit t_nuc
+                        yc_l = self.yc_l[k][i]
                         break
 
-                for i in range(len(self.yc_r[t-self.t_nuc])):
-                    if self.xc_r[t-self.t_nuc][i] == xc[1]:
-                        # xc_r = self.xc_r[self.image_t[k]-self.t_nuc][i]
-                        yc_r = self.yc_r[t-self.t_nuc][i]
+                for i in range(len(self.yc_r[k])):
+                    if self.xc_r[k][i] == rc[1]:
+                        yc_r = self.yc_r[k][i]
                         break
-                frontLine.add_point(xc[0], yc_l)
-                frontLine.add_point(xc[1], yc_r)
 
-                for i in range(5):
+                # Il y a bcp d'écart entre la position du front à droite et
+                # à gauche ====> PB !
+                if yc_l > yc_r+10 or yc_l < yc_r-10:
+                    log("=========WAaaaaaaRNING=========")
+                    log("Left and right position get a large difference :")
+                    log("rc found : ", rc)
+                    log("(yc_l, yc_r) : ", yc_l, yc_r)
+                    log("For t = ", self.t_nuc+k)
+                    log("\tFor k = ", k)
+                    log("(max, min) of tc : ", np.max(tc), np.min(tc))
+                    log("(t_nuc, t_end) sended : ", self.t_nuc, self.t_end)
+
+                frontLine.add_point(rc[0], yc_l)
+                frontLine.add_point(rc[1], yc_r)
+
+                for i in [0, 1, 3, 4]:  # range_r except 2 (center)
                     # on ne prend que les point pouvant appartenir au front
-                    if self.range_r[i] > xc[0] and self.range_r[i] < xc[1]:
+                    if self.tf[i] > k+self.t_nuc:
                         x, y = self.curves[i].get_interpolation()
-                        y = int(y[t - self.t_nuc]) + self.dz
+                        y = int(y[k+self.t_nuc]) + self.dz
                         # dz correct the crop of spatios
 
                         if (
                             euclidian_dist(
-                                self.range_r[i], y, xc[0], yc_l) > 15
+                                self.range_r[i], y, rc[0], yc_l) > 5
                             and euclidian_dist(
-                                self.range_r[i], y, xc[1], yc_r) > 15
+                                self.range_r[i], y, rc[1], yc_r) > 5
                         ):
-                        # min distance beetwenn point and contour
+                            # min distance beetwenn point and contour
                             frontLine.add_point(self.range_r[i], y)
+
+                # cas range_r == 2, center
+                x, y = self.curves[2].get_interpolation()
+                y = int(y[k+self.t_nuc]) + self.dz
+                frontLine.add_point(self.range_r[2], y)
 
                 x, y = frontLine.get_interpolation()
                 x_front.append(x)
@@ -2842,47 +2931,54 @@ class SpatioFrontTrack(object):
 
             # Si on ne trouve qu'un seul point à l'interface
             # ------------
-            elif len(xc) == 1:
-                xc = xc[0]
-                if xc < self.rc:
-                    for i in range(len(self.yc_l[self.image_t[k]-self.t_nuc])):
-                        if self.xc_l[self.image_t[k]-self.t_nuc][i] == xc:
+            elif len(rc) == 1:
+                log("There only one rc founded")
+                log("rc found : ", rc)
+                log("For t = ", t_nuc+k)
+                log("\tFor k = ", k)
+                log("(max, min) of tc : ", np.max(tc), np.min(tc))
+                log("(t_nuc, t_end) sended : ", self.t_nuc, self.t_end)
+
+                rc = rc[0]
+                if rc < self.rc:
+                    for i in range(len(self.yc_l[k+dt0])):
+                        if self.xc_l[k+dt0][i] == rc:
                             # xc_l = self.xc_l[self.image_t[k]-self.t_nuc][i]
-                            yc_l = self.yc_l[self.image_t[k]-self.t_nuc][i]
+                            yc_l = self.yc_l[k+dt0][i]
                             break
-                    frontLine.add_point(xc, yc_l)
+                    frontLine.add_point(rc, yc_l)
 
                     for i in range(5):
                         # on ne prend que les point pouvant appartenir au front
-                        if self.range_r[i] > xc and self.range_r[i] <= self.rc:
+                        if self.range_r[i] > rc and self.range_r[i] <= self.rc:
                             x, y = self.curves[i].get_interpolation()
-                            y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
+                            y = int(y[k+dt0]) + self.dz
                             # dz correct the crop of spatios
                             if (
                                 euclidian_dist(
-                                    self.range_r[i], y, xc, yc_l) > 15
+                                    self.range_r[i], y, rc, yc_l) > 15
                             ):
                                 # min distance beetwenn point and contour
                                 frontLine.add_point(self.range_r[i], y)
 
                 else:
-                    for i in range(len(self.yc_r[self.image_t[k]-self.t_nuc])):
-                        if self.xc_r[self.image_t[k]-self.t_nuc][i] == xc:
+                    for i in range(len(self.yc_r[k+dt0])):
+                        if self.xc_r[k+dt0][i] == rc:
                             # xc_r = self.xc_r[self.image_t[k]-self.t_nuc][i]
-                            yc_r = self.yc_r[self.image_t[k]-self.t_nuc][i]
+                            yc_r = self.yc_r[k+dt0][i]
                             break
 
-                    frontLine.add_point(xc, yc_r)
+                    frontLine.add_point(rc, yc_r)
 
                     for i in range(5):
                         # on ne prend que les point pouvant appartenir au front
-                        if self.range_r[i] >= self.rc and self.range_r[i] < xc:
+                        if self.range_r[i] >= self.rc and self.range_r[i] < rc:
                             x, y = self.curves[i].get_interpolation()
-                            y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
+                            y = int(y[k+dt0]) + self.dz
                             # dz correct the crop of spatios
                             if (
                                 euclidian_dist(
-                                    self.range_r[i], y, xc, yc_l) > 15
+                                    self.range_r[i], y, rc, yc_l) > 15
                             ):
                                 # min distance beetwenn point and contour
                                 frontLine.add_point(self.range_r[i], y)
@@ -2891,7 +2987,21 @@ class SpatioFrontTrack(object):
                 x_front.append(x)
                 y_front.append(y)
 
-        return x_front, y_front, zc
+            # sinon (rc == 0)
+            else:
+                log("There is no rc founded")
+                log("rc found : ", rc)
+                log("For t = ", t_nuc+k)
+                log("\tFor k = ", k)
+                log("(max, min) of tc : ", np.max(tc), np.min(tc))
+                log("(t_nuc, t_end) sended : ", self.t_nuc, self.t_end)
+                x_front.append([])
+                y_front.append([])
+
+        # output
+        # ------------
+        log("Front constructed")
+        return x_front, y_front
 
 
 class SplineBuilder_nonlinear(object):

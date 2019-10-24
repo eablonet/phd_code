@@ -12,7 +12,7 @@ Emeryk Ablonet : eablonet
 
 Copyright
 ---------
-IMFT and Toulouse INsP
+IMFT and Toulouse INP
 
 Dates
 ----
@@ -71,6 +71,8 @@ from packages.design import color as ea_color
 from packages.library import main as pers_conv
 
 from ..gui import ClaheWindow as cw
+
+from packages.theory import Stefan as ste
 
 
 # code
@@ -203,13 +205,70 @@ class Front:
         for i in range(0, len(self.x), dt):
             plt.plot(
                 self.x[i], self.y[i],
-                ls='--', color='tab:blue'
+                ls='--',
             )
         plt.grid(True)
         plt.xlabel('r (px)')
         plt.ylabel('z_d (t) (px)')
         plt.gca().set_aspect('equal', adjustable='box')
         plt.show()
+
+    def get_x_real(self, rc, pxmm=None):
+        """Return true value of x, center on rc.
+
+        input
+            rc: int or float
+                in px
+            pxmm: float or None
+                if None return value in px else in mm. Default is None.
+        """
+        x = []
+        for t in range(len(self.x)):
+            x.append([])
+            for i in range(len(self.x[t])):
+                x[t].append(
+                    rc - self.x[t][i]
+                )
+                x[t][i] /= pxmm if pxmm is not None else 1
+
+        return x
+
+    def get_y_real(self, y0=None, pxmm=None):
+        """Return true value of y, regard to baseline.
+
+        input
+            y0: int or float
+                in px. baseline position. If None, the first value of front
+                is used.
+            pxmm: float or None
+                if None return value in px else in mm. Default is None.
+        """
+        y = []
+        if y0 is None:
+            c = 0
+            while len(self.y[c]) == 0:
+                c += 1
+            y0 = np.nanmean(self.y[c])
+
+        for t in range(len(self.y)):
+            y.append([])
+            for i in range(len(self.y[t])):
+                y[t].append(y0-self.y[t][i])
+                y[t][i] /= pxmm if pxmm is not None else 1
+
+        return y
+
+    def get_front_rloc(self, row):
+        """Return the front position at specific location."""
+        y = []
+        for t in range(len(self.x)):
+            for i in range(len(self.x[t])):
+                if self.x[t][i] == row:
+                    y.append(self.y[t][i])
+        return y
+
+    def get_tz0(self):
+        None
 
 
 class Contour:
@@ -228,7 +287,7 @@ class Contour:
 
     def isEmpty(self):
         """Return True if contour has not been loaded."""
-        if None in [self.xl, self.yl, self.xr, self.yr]:
+        if any([t is None for t in [self.xl, self.yl, self.xr, self.yr]]):
             return True
         else:
             return False
@@ -533,6 +592,7 @@ class Data:
             # ------
             'delay': 'delay', 'exp': 'exp', 'fps': 'fps',
             'delay_exp_real': 'delay_exp_real', 'real_fps': 'fps_real',
+            'px_mm': 'px_mm',
 
             # observation
             # --------
@@ -549,6 +609,22 @@ class Data:
             return 'None'
         else:
             return self.data['date'] + 'n' + str(self.data['serie'])
+
+    @property
+    def fps(self):
+        """Return the fps of the experiment."""
+        if self.data['fps_real'] is None:
+            return self.data['fps']
+        else:
+            return self.data['fps_real']
+
+    @property
+    def Tcnuc(self):
+        """Return Nucleation temperature."""
+        if self.data['Tc_nuc'] is None:
+            return self.data['Tc_set']
+        else:
+            return self.data['Tc_nuc']
 
 
 class Stack(object):
@@ -590,6 +666,9 @@ class Stack(object):
         self.image = ImageList()  # array containing all Image
         self.range_images = range(0)
         self.n_selected = None
+
+        self.stefan = ste.Stefan()
+        self.__initStefan__()
 
     def __str__(self):
         """Return n# image info."""
@@ -638,6 +717,22 @@ class Stack(object):
                 self.geom.rc = self.data.data['rc']
                 self.geom.z0 = self.data.data['z0']
 
+        if os.path.exists(self.path + 'front'):
+            # reader for old data
+            # =================
+            zf = np.load(self.path + 'front' + '/interpolation.npy')
+
+            x, y = [], []
+            for t in range(zf.shape[0]):
+                x.append([])
+                y.append([])
+                for r in range(zf.shape[1]):
+                    if zf[t, r] != 0:
+                        x[t].append(r)
+                        y[t].append(zf[t, r])
+            self.front.x = x
+            self.front.y = y
+
         if os.path.exists(self.path + 'result'):
             self.isTreated = True
             self.listResult = [
@@ -661,6 +756,9 @@ class Stack(object):
                 ge = np.load(
                         self.path + 'result/geom.npy', allow_pickle=True
                     )[()]
+
+                # set geom data
+                # -------------
                 self.geom.rl = ge['rl']
                 self.geom.rr = ge['rr']
                 self.geom.rc = ge['rc']
@@ -668,6 +766,20 @@ class Stack(object):
                 self.geom.z0 = ge['z0']
                 self.geom.zf = ge['zf']
                 self.data.data['z0'] = ge['z0']
+
+                # update Stefan values
+                # -------------
+                self.stefan.set_geometry(
+                    H=[
+                        0,
+                        (self.geom.zb - self.geom.z0)/self.data.data['px_mm']*1e3,
+                        0
+                    ],
+                    dz=[0, .005, 0],
+                    unit='mm'
+                )
+        else:
+            os.mkdir(self.path + 'result')
 
         if self.path is None:
             raise ValueError(
@@ -695,6 +807,15 @@ class Stack(object):
     def _set_directory(self):
         """Define direcoties."""
         self.exporting_directory = self.path + 'export_image/'
+
+    def __initStefan__(self):
+        """Init Stefan solver."""
+        self.stefan.solver = [0, 0, 2, 0]
+        self.stefan.dilatation = True
+        self.stefan.boundaries = [0, 0]  # bottom, top
+        self.stefan.set_geometry(dz=[0, .05, 0], unit='mm')
+        self.stefan.set_time_condition(ts=0, tend=100, dt=.01, auto=True)
+        # times
 
     def load_images(self, regex='cam1_*', ext='.tif'):
         """Update the lists of image."""
@@ -892,7 +1013,7 @@ class Stack(object):
         )
         pbar.start()
         for i in self.range_images:
-            self.image[i].set_rotate(self.data.data['alpha'])
+            self.image[i].set_rotate(-self.data.data['alpha'])
             pbar.update(i)
         pbar.finish()
 
@@ -983,6 +1104,14 @@ class Stack(object):
             self.geom.z0 = geom['z0']
             self.geom.zb = geom['zb']
 
+            # update Stefan values
+            # -------------
+            self.stefan.set_geometry(
+                H=[0, (self.zb - self.z0)/self.data.data['px_mm'], 0],
+                dz=[0, .005, 0],
+                unit='mm'
+            )
+
         if not self.geom.isEmpty():
             print("There's already geometry data,")
             print("Do you want to overwrite them ? (y/n)")
@@ -1021,10 +1150,10 @@ class Stack(object):
 
             # data dictionary
             # -------
-            t_nuc = int(self.data.data['t_nuc_calc'])
+            t_ref = int(self.data.data['t_ref_calc'])
             t_end = int(self.data.data['t_end_calc'])
             data = {
-                't_nuc': t_nuc,
+                't_nuc': t_ref,
                 't_end': t_end,
                 'geom': self.geom,
                 'range_r': range_r
@@ -1033,8 +1162,8 @@ class Stack(object):
             # select images
             # ----------
             image = []
-            image.append(self.get_image(t_nuc))
-            image.append(self.get_image(int((t_nuc+t_end)/2)))
+            image.append(self.get_image(t_ref))
+            image.append(self.get_image(int((t_ref+t_end)/2)))
             image.append(self.get_image(t_end))
 
             # select spatio
@@ -1074,9 +1203,6 @@ class Stack(object):
         else:  # pas encore de contour, on le detect
             set_contour()
 
-        # display the contour
-        self.contour.plot()
-
     def track_front(self):
         """Get the front manually."""
         if self.contour.isEmpty():
@@ -1098,11 +1224,11 @@ class Stack(object):
                 int(self.geom.rc + 2/3*(self.geom.rr - self.geom.rc)),
             ]
 
-            t_nuc = int(self.data.data['t_nuc_calc'])
+            t_ref = int(self.data.data['t_ref_calc'])
             t_end = int(self.data.data['t_end_calc'])
 
             data = {
-                't_nuc': t_nuc,
+                't_nuc': t_ref,
                 't_end': t_end,
                 'geom': self.geom,
                 'range_r': range_r
@@ -1111,8 +1237,8 @@ class Stack(object):
             # create image and spatio
             # ---------
             image = []
-            image.append(self.get_image(t_nuc+10))
-            image.append(self.get_image(int((t_nuc+t_end)/2)))
+            image.append(self.get_image(t_ref+10))
+            image.append(self.get_image(int((t_ref+t_end)/2)))
             image.append(self.get_image(t_end-10))
 
             sp = {}
@@ -1122,7 +1248,7 @@ class Stack(object):
             # track front
             # -----------
             frontTracker = lb.SpatioFrontTrack(
-                sp, image, data, self.contour, front_pt
+                sp, image, data, self.contour, point
             )
             plt.show()
 
@@ -1132,6 +1258,12 @@ class Stack(object):
             pt = frontTracker.get_tracked_points()
             np.save(self.path + 'result/front', front)
             np.save(self.path + 'result/front_pt', pt)
+
+            # set self.front points
+            # ---------
+            self.front.x = front[0]
+            self.front.y = front[1]
+
 
         if not self.front.isEmpty():
             print("There's already a front detected,")
@@ -1155,207 +1287,437 @@ class Stack(object):
         else:
             set_front()
 
-    def view_all_profil(self, zf, n_space):
-        """Plot front dynamic and propagation."""
+    def front_profile(self, dt=1):
+        """View front profile in usi."""
+        pxmm = self.data.data['px_mm']
+        x, y = np.zeros(len(self.front.x)), np.zeros(len(self.front.x))
+        x = self.front.x
+        y = self.front.y
 
-        px_mm = float(self.datas.iloc[0]['px_mm'])
-        t_ref = int(self.datas.iloc[0]['t_ref_calc'])
-        rc = int(self.datas.iloc[0]['rc'])
+        # centering data
+        xf = []
+        if self.geom.rc is not None:
+            for t in range(len(x)):
+                xf.append([])
+                for i in range(len(x[t])):
+                    xf[t].append((self.geom.rc - x[t][i]) / pxmm)
+        else:
+            for t in range(len(x)):
+                xf.append([])
+                for i in range(len(x[t])):
+                    xf[t].append(x[t][i] / pxmm)
 
-        zf[zf == 0] = np.nan
-        zf = self.current_image.size[0] - zf
-
-        zf -= np.nanmean(zf[t_ref, :])
-
-        fig, ax0 = plt.subplots(figsize=[8, 6])
-        fig, ax1 = plt.subplots(figsize=[8, 6])
-        x = np.arange(self.current_image.size[1])
-        x = x[::n_space] - rc
-        # colormap = plt.get_cmap('spring')
-        # ax1.set_prop_cycle(
-        #     [
-        #         colormap(i) for i in np.linspace(0, 0.9, len(zf[:, 0]))
-        #     ]
-        # )
-
-        for time in range(len(zf[:, 0])):
-            ax1.plot(
-                x/px_mm*1e3, zf[time, ::n_space]/px_mm*1e3,
-                '--', linewidth=2,
+        # remove baseline height
+        yf = []
+        if self.geom.zb is None:
+            c = 0
+            while len(y[c]) == 0:
+                c += 1
+            for t in range(len(y)):
+                yf.append([])
+                for i in range(len(y[t])):
+                    yf[t].append((np.nanmean(y[c])-y[t][i]) / pxmm)
+        else:
+            for t in range(len(y)):
+                yf.append([])
+                for i in range(len(y[t])):
+                    yf[t].append((self.geom.zb - y[t][i]) / pxmm)
+        cmap = plt.get_cmap('coolwarm', len(x))
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        for t in range(0, len(x), dt):
+            ax.plot(
+                xf[t], yf[t],
+                ls='--', color=cmap(t)
             )
-            ax0.plot(
-                x, zf[time, ::n_space],
-                '--', linewidth=2
+        time = np.arange(len(x)) / self.data.fps
+        fig.colorbar(mapname='coolwarm', values=time, clabel='Time')
+        ax.xlabel(r'$r$ (mm)')
+        ax.ylabel(r'$z_d$ (t) (mm)')
+        # plt.gca().set_aspect('equal', adjustable='box')
+        fig.show()
+
+    def get_dynamic_mean_front(self):
+        """Return mean dynamic front."""
+        pxmm = self.data.data['px_mm']
+        if self.geom.zb is None:
+            yf = self.front.get_y_real(y0=None, pxmm=pxmm)
+        else:
+            yf = self.front.get_y_real(y0=self.geom.zb, pxmm=pxmm)
+
+        time = np.arange(0, len(yf))
+
+        y_mean = []
+        y_std = []
+
+        for t in time:
+            y_mean.append(np.mean(yf[t]))
+            y_std.append(np.std(yf[t]))
+
+        return y_mean, y_std
+
+    def get_dynamic_loc_front(self, col):
+        """Return dynamic front at a specific radius(row in px)."""
+        pxmm = self.data.data['px_mm']
+        xf = self.front.x
+        if self.geom.zb is None:
+            yf = self.front.get_y_real(y0=None, pxmm=pxmm)
+        else:
+            yf = self.front.get_y_real(y0=self.geom.zb, pxmm=pxmm)
+
+        yi = []
+        time = []
+        for i, x in enumerate(xf):
+            id = np.where(x == col)
+            if len(id[0]) == 1:
+                time.append(i)
+                yi.append(yf[i][id[0][0]])
+        return yi, time
+
+    def plot_dynamic_mean_front(self):
+        """Display the mean front of solidification."""
+        y_m, _ = self.get_dynamic_mean_front()
+
+        dt0 = int(
+                self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc'] - 1
+            ) / self.data.fps
+        time = np.arange(len(y_m)) / self.data.fps
+
+        fig = pl.Figure()
+        fig.set_win_title("Mean front dynamic")
+        ax = fig.add_ax(111)
+        ax.plot(
+            time-dt0, y_m,
+            marker='.', ls='-.', color='tab:red', markevery=2
+        )
+        ax.ax.set_title("Evolution du front moyen de solidification")
+        ax.xlabel('time (s)')
+        ax.ylabel(r'$z_i(m)$')
+        fig.show()
+
+    def get_qa(self, eps=.1):
+        """Return the closer qa to fit tz0."""
+        tz0 = self.get_tz0(usi=True)
+
+        s = ste.Stefan()
+        qa = -2000
+
+        s.solver = [0, 1, 1, 0]  # air, liq, ice, subs
+        s.dilatation = False
+        s.boundaries = [0, 2]  # bottom, top
+        s.boundValues = [-10, qa]  # bottom, top
+        z0 = (self.geom.zb - self.geom.z0)/self.data.data['px_mm']
+        s.set_geometry(
+            H=[0, z0*1e3, 0], dz=[0, .005, 0], unit='mm'
+        )  # air, liq, sub
+        s.set_time_condition(
+            ts=0, tend=self.get_tf(usi=True),
+            dt=.1,
+            auto=False
+        )  # times
+
+        s.solve()
+        b0 = 2e12
+        print('Solving qa, please wait...')
+        while abs(s.tz0 - tz0) > eps:
+            if abs(tz0/s.tz0-1) < abs(b0):
+                b1 = tz0/s.tz0-1
+            if b1*b0 < 0:  # changement de signe
+                b0 = b1
+                qa1 = qa*(b0+1)
+                qa = (qa + qa1)/2
+            else:
+                b0 = b1
+                qa *= b0+1
+            # if stefan.tz0 > tz0 => qa might decrease
+            # else stefan.tz0 > tz0 => might increase
+            s.boundValues[1] = qa
+            s.solve()
+        return qa
+
+    def get_tz0(self, usi=False):
+        """Return tz0 time."""
+        z0 = (self.geom.zb - self.geom.z0) / self.data.data['px_mm']
+        yi, _ = self.get_dynamic_mean_front()
+        t = range(len(yi))
+        tz0 = t[np.argmin(np.abs(z0 - np.array(yi)))]
+        if usi:
+            tz0 /= self.data.fps
+        return tz0
+
+    def get_tz0ste(self):
+        """Return theoretical Stefan time."""
+        return self.stefan.tz0
+
+    def get_t12(self, usi=False):
+        """Return tz0 time."""
+        z0 = (self.geom.zb - self.geom.z0) / self.data.data['px_mm']
+        yi, _ = self.get_dynamic_mean_front()
+        t = list(range(len(yi)))
+        t12 = t[np.argmin(np.abs(z0/2 - np.array(yi)))]
+        if usi:
+            if self.data.data['fps_real'] is None:
+                fps = self.data.data['fps']
+            else:
+                fps = self.data.data['fps_real']
+            t12 /= fps
+        return t12
+
+    def get_tf(self, usi=False):
+        """Return tz0 time."""
+        yi = self.front.y
+        tf = len(yi)-1
+        if usi:
+            if self.data.data['fps_real'] is None:
+                fps = self.data.data['fps']
+            else:
+                fps = self.data.data['fps_real']
+            tf /= fps
+        return tf
+
+    def get_ice_volume(self):
+        """Calculate the volume of ice over time."""
+        vol = []  # init vector volume
+
+        # get mean front position in px
+        yi = self.front.y
+        zi = []
+        for y in yi:
+            zi.append(int(np.mean(y)))
+
+        for t in range(len(zi)):
+            # construct r(y) interpolation
+            # -------------
+            y = list(
+                range(0, self.geom.zb - zi[t])
             )
-        ax0.set_xlabel('r (px)')
-        ax0.set_ylabel('z (px)')
-        ax0.grid(True)
 
-        ax1.set_xlabel('r (mm)', fontsize=18)
-        ax1.set_ylabel('z (mm)', fontsize=18)
-        ax1.grid(True)
-        plt.show()
-
-    def read_manual_front(self):
-        """Plot front dynamic and propagation.
-
-        Returns
-        slope : ndarray
-            Mean inclination of the the solidificaito front at each time
-        zf : ndarray
-            Position of the solidification front at each time and for each x
-            position
-
-        """
-        slope = np.load(self.data_directory + 'pente.npy')
-        zf = np.load(self.data_directory + 'y0.npy')
-        zf[zf == 0] = np.nan
-
-        return slope, zf
-
-    def read_data(self, folder_name='front'):
-        """Plot front dynamic and propagation.
-
-        Returns
-        zf : ndarray
-            Position of the solidification front at each time and for each x
-            position
-        """
-        zf = np.load(self.data_directory + folder_name + '/interpolation.npy')
-        # pts = np.load(self.data_directory + folder_name + '/points.npy')
-        zf[zf == 0] = np.nan
-
-        return zf#, pts
-
-    def read_sa_contour(self, folder_name='sa_contour'):
-        """Plot front dynamic and propagation.
-
-        Returns
-        zf : ndarray
-            Position of the solidification front at each time and for each x
-            position
-        """
-        vol = np.load(self.data_directory + folder_name + '/volume.npy')
-        Cl = np.load(self.data_directory + folder_name + '/Cr_left.npy')
-        Cr = np.load(self.data_directory + folder_name + '/Cr_right.npy')
-        # pts = np.load(self.data_directory + folder_name + '/points.npy')
-        # zf[zf == 0] = np.nan
-
-        return vol, Cl, Cr  #, pts
-
-    def threshold(self):
-        self.current_image.plot_hist()
-        plt.show()
-        a = int(input('Select low threshold value : \n'))
-        b = int(input('Select upper threshold value : \n'))
-
-        # === loop over images === #
-        for i in range(self.n_image_tot):
-            self.read_image(i)
-            im = self.current_image.image
-            im[im < a] = a
-            im[im > b] = b
-
-            if i < 9:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_000' + str(i+1),
-                    im
+            xl = []
+            xr = []
+            for j in y:
+                xl.append(
+                    self.contour.xl[t][np.argmin(abs(
+                        self.geom.zb - self.contour.yl[t] - j
+                    ))]
                 )
-            elif i < 99:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_00' + str(i+1),
-                    im
+                xr.append(
+                    self.contour.xr[t][np.argmin(abs(
+                        self.geom.zb - self.contour.yr[t] - j
+                    ))]
                 )
-            elif i < 999:
-                np.save(
-                    self.exporting_directory + 'lastOp/' + 'i_0' + str(i+1),
-                    im
+            xl, xr = np.array(xl), np.array(xr)
+
+            # calcul the volume
+            # ---------------
+            volume_calc = (
+                np.pi/2 * np.sum(np.power(self.geom.rc-xl, 2)) +
+                np.pi/2 * np.sum(np.power(xr-self.geom.rc, 2))
+            )
+
+            vol.append(volume_calc)
+
+        return vol
+
+    def plot_vol_mean_front_comparison(self):
+        """Plot the volume from contour and volume from front."""
+        vol_d = self.contour.get_volume()
+        dt0 = int(
+                self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc'] - 1
+            )
+        v0 = vol_d[dt0]
+        dt0 /= self.data.fps
+        vol_d = [i / self.data.data['px_mm']**3 for i in vol_d]
+        vol_i = self.get_ice_volume()
+        vol_tot = [
+            i*(1 - 916/999)/self.data.data['px_mm']**3 + v0/self.data.data['px_mm']**3
+            for i in vol_i
+        ]
+        time = np.arange(len(vol_d)) / self.data.fps
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        ax.plot(
+            time-dt0, vol_d, color='tab:blue',
+            markevery=2, marker='s',
+            ls='--',
+            label='Volume de la goutte (mm^3)'
+        )
+        ax.plot(
+            time-dt0, vol_tot, color='tab:red',
+            markevery=2, marker='s',
+            ls='--',
+            label='Construction du volume total (mm^3)'
+        )
+        ax.legend()
+
+        fig.show()
+
+    def plot_mean_vs_loc_kinetics(self):
+        """Display the mean front and 5 locals front of solidification."""
+        fig = pl.Figure()
+        fig.set_win_title("Mean front dynamic")
+        ax = fig.add_ax(111)
+        y_m, _ = self.get_dynamic_mean_front()
+        dt0 = int(
+                self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc'] - 1
+            ) / self.data.fps
+
+        time = np.arange(len(y_m)) / self.data.fps
+        ax.plot(
+            time-dt0, y_m,
+            marker='.', ls='-', color='tab:red', markevery=2,
+            label='Mean front'
+        )
+        range_r = [
+            int(self.geom.rl + 1/3*(self.geom.rc - self.geom.rl)),
+            int(self.geom.rl + 2/3*(self.geom.rc - self.geom.rl)),
+            int(self.geom.rc),
+            int(self.geom.rc + 1/3*(self.geom.rr - self.geom.rc)),
+            int(self.geom.rc + 2/3*(self.geom.rr - self.geom.rc)),
+        ]
+        cmap = plt.cm.get_cmap('tab20', 5)
+        for i, r in enumerate(range_r):
+            yi, time = self.get_dynamic_loc_front(r)
+            time = np.array(time)/self.data.fps
+
+            ax.plot(
+                time-dt0, yi,
+                marker='.', ls='-.', color=cmap(i), markevery=2,
+                label='Front location : {:.1f}mm'.format(
+                    (r - self.geom.rc)/self.data.data['px_mm']*1e3
                 )
+            )
 
-    def hist_evol(self):
+        ax.ax.set_title("Mean kinetic, and locals kinetics")
+        ax.xlabel('time (s)')
+        ax.ylabel(r'$z_i(m)$')
+        ax.legend()
+        fig.show()
 
-        fig, [ax1, ax2] = plt.subplots(nrows=2, ncols=1, figsize=[11, 7])
-        for i in range(self.n_image_tot):
-            self.read_image(i)
-            H, cs = self.current_image.plot_hist()
-            print(np.mean(H))
-            ax1.plot(i, np.mean(H), '.r')
-            ax2.plot(i, np.std(H), '.r')
-        plt.show()
+    def fit_mean_kinetic(self, win=.8):
+        """Return the best fit.
 
-    def make_montage(
-        self, images, add_front=False, add_timer=False, rot=False
-    ):
+        There is an automatic windowing to conserve only point > 0 and 80% of
+        first remaining points (to elimate last acceleratio due to dilatation)
+
+        input:
+        ------
+            win: float [0..1]
+                Percent of firsts points > 0 to keep in fitting data.
+                Default .8
+        """
+        def fit_t12(x, a):
+            """Fit with impose 1/2 slope."""
+            return a + x/2
+
+        def fit_best(x, a, b):
+            """Fit with impose best exposant."""
+            return a*x + b
+
+        # data
+        # ----
+        y_mean, _ = self.get_dynamic_mean_front()
+        time = np.arange(len(y_mean)) / self.data.fps
+        dt0 = int(
+                1 + self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc']
+            ) / self.data.fps
+
+        # log10 conversion
+        # ----------------
+        idx = np.where(time - dt0 > 0)
+        ylog = np.log10(np.array(y_mean)[idx[0]])
+
+        # windowing 0 to 80%
+        # -----------------
+        tlog = time[idx[0]]-dt0
+        idx = np.where(tlog < win*np.max(tlog))
+        tlog = np.log10(tlog[idx[0]])
+        ylog = ylog[idx[0]]
+
+        # fits
+        p12, _ = optimize.curve_fit(
+            fit_t12, tlog, ylog
+        )
+        pbest, _ = optimize.curve_fit(
+            fit_best, tlog, ylog
+        )
+        time_fit = np.linspace(0, np.max(time-dt0), 100)
+        y_t12 = 10**(p12[0])*time_fit**(1/2)
+        y_best = 10**(pbest[1])*time_fit**(pbest[0])
+
+        # log('fit : ', popt[0])
+        # log('10**fit : ', 10**popt[0])
+        # log('time_fit : ', time_fit)
+        # log('time_fit**(1/2): ', time_fit**(1/2))
+        # log('10**(fit)*time_fit**(1/2): ', 10**popt[0]*time_fit**(1/2))
+
+        # display figure
+        # --------------
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        ax.loglog(
+            time-dt0, y_mean,
+            '-.o',
+            color='tab:red', mfc='none', label='data'
+        )
+        ax.loglog(
+            time_fit, y_t12,
+            '-b', color='tab:blue',
+            label=r'Fit $\sim t^{1/2}$'
+        )
+        ax.loglog(
+            time_fit, y_best,
+            '-', color='tab:green',
+            label=r'Best Fit $\sim t^{{{:.2f}}}$'.format(pbest[0])
+        )
+        ax.legend()
+        ax.xlabel('Time (s)')
+        ax.ylabel('Height (m)')
+        fig.show()
+
+        return p12, pbest
+    # to check if to keep or to erase
+
+    def make_montage(self, front=True, contour=True):
         """Create a montage.
 
         Parameters
         ----------
-        image : list of int
-            List of all image to plot.
+        front : bool
+            Enable front diplaying
+        contour : bool
+            Enable contour diplaying
 
         """
-        rows = (len(images)-1) // 4 + 1
-        if rows > 1:
-            cols = 4
-        else:
-            cols = len(images) % 4
+        tnuc = self.data.data['t_ref_calc']
+        tend = self.data.data['t_end_calc']
+        dt = int((tend-tnuc)/5)
 
-        fig = plt.figure(
-            figsize=(2*cols, 2*rows)
-        )
-        plt.subplots_adjust(left=None, bottom=None, right=None, top=None)
+        fig = pl.Figure()
+        ax = []
+        time = np.int64(np.append(tnuc + np.arange(5)*dt, tend))
+        cmap = plt.get_cmap('coolwarm', 6)
+        for i, t in enumerate(time):
+            ax.append(fig.add_ax(231+i))
+            ax[-1].imshow(self.get_image(t).image)
 
-        if add_front:
-            y0 = np.load(self.data_directory + 'y0.npy')
-            y0[y0 == 0] = np.nan
-            x_rot = np.arange(self.current_image.size[1])
-            ref_pente = self.get_data(['alpha'])[0]
-
-        if add_timer:
-            time_ref, fps = self.get_data(
-                ['time_ref', 'fps']
-            )
-
-        temp = self.current_image_number
-        for row in range(rows):
-            for col in range(cols):
-                k = row*cols + col
-                if k < len(images):
-                    self.read_image(images[k])
-                    if rot:
-                        im = self.current_image.rotate(-ref_pente)
-                    else:
-                        im = self.current_image.image
-
-                    ax = plt.subplot(rows, cols, k+1)
-                    ax.imshow(im, cmap='gray')
-                    if add_front:
-                        if rot:
-                            x = x_rot
-                            y = y0[images[k], :]
-                        else:
-                            x, y = self._rot_inv(
-                                x_rot,
-                                y0[images[k], :],
-                                -ref_pente
-                            )
-                        ax.plot(
-                            x, y,
-                            '.g', markersize=1,
-                        )
-                    if add_timer:
-                        ax.text(
-                            5,
-                            5,
-                            '{:.1f}'.format((images[k] - time_ref-4)/fps),
-                            bbox={'facecolor': 'white', 'pad': 5}
-                        )
-                    ax.axis('off')
-
-        fig.tight_layout()
-        # gridspec_kw={'wspace': .05, 'hspace': .05}, squeeze=True
-        plt.show()
-        self.read_image(temp)
+            n = int(t - tnuc)
+            if front:
+                x, y = self.front.x[n], self.front.y[n]
+                ax[-1].plot(
+                    x, y,
+                    ls='--', color=cmap(i), alpha=.5
+                )
+            if contour:
+                x1, y1 = self.contour.xl[n], self.contour.yl[n]
+                x2, y2 = self.contour.xr[n], self.contour.yr[n]
+                ax[-1].plot(
+                    x1, y1, x2, y2,
+                    ls='--', color=cmap(i), alpha=.5
+                )
+            ax[-1].ax.axis('off')
+            ax[-1].title('t : {:.1f}s'.format((t - tnuc)/ self.data.fps))
+            ax[-1].ax.grid(False)
+        fig.show()
 
     def view_propagation_front(self, zf):
         """Display front inclination over timeself."""
@@ -1464,240 +1826,6 @@ class Stack(object):
 
         self.read_image(temp_ni)
 
-    def get_dynamic_front(self, zf, usi=False):
-        """Return correct dynamic front.
-
-        Parameters
-        ----------
-        zf : ndarray
-            Contain "brut" front information
-        usi : bool
-            False by default. If true, convert pixel length into meter,
-            and time in second
-
-        """
-        time_ref = int(self.datas['t_ref_calc'].values)
-        px_mm = float(self.datas.iloc[0]['px_mm'])
-        fps = float(self.datas.iloc[0]['fps'])
-        x_space = np.arange(len(zf[0, :]))
-        t_space = np.arange(len(zf[time_ref:, 0]))
-
-        zf = zf[time_ref:, :]
-        zf_mean = np.zeros(len(zf[:, 0]))
-        zf_std = np.zeros(len(zf[:, 0]))
-
-        for i in range(1, len(zf[:, 0])):
-            for j in x_space:
-                if zf[i, j] != 0:
-                    zf[i, j] = (zf[0, j] - zf[i, j])
-                else:
-                    zf[i, j] = np.nan
-            if all(np.isnan(zf[i, :])):  # if there is only nan
-                zf_mean[i] = np.inf
-                zf_std[i] = np.nan
-            else:
-                zf_mean[i] = np.nanmean(zf[i, :])
-                zf_std[i] = np.nanstd(zf[i, :])
-        zf[0, :] = 0
-        zf_mean[0] = 0
-
-        # zf_mean[zf_mean == np.inf] = np.nan
-
-        if usi:
-            t_space = t_space/fps
-            zf /= px_mm
-            zf_mean /= px_mm
-            zf_std /= px_mm
-
-        return t_space, zf, zf_mean, zf_std
-
-    def get_dynamic_front_by_loc(self, zf, loc, usi=False):
-        """Return correct dynamic front for a specific location.
-
-        Parameters
-        ----------
-        zf : ndarray
-            Contain "brut" front information
-        loc : int
-            Position in e_r to return (in pixel !)
-        usi : bool
-            False by default. If true, convert pixel length into meter,
-            and time in second
-
-        """
-        time_ref = int(self.datas['t_ref_calc'].values)
-        px_mm = float(self.datas.iloc[0]['px_mm'])
-
-        zf = zf[time_ref:, :]
-        zf_loc = np.zeros(len(zf[:, 0]))
-
-        for i in range(1, len(zf[:, 0])):
-            if zf[i, loc] != 0:
-                zf_loc[i] = (zf[0, loc] - zf[i, loc])
-            else:
-                zf_loc[i] = np.nan
-
-        zf_loc[0] = 0
-
-        zf_loc[zf_loc == np.inf] = np.nan
-
-        if usi:
-            zf_loc /= px_mm
-
-        return zf_loc
-
-    def get_dynamic_front_by_win(self, zf, center, width, usi=False):
-        """Return correct dynamic front in a window.
-
-        Parameters
-        ----------
-        zf : ndarray
-            Contain "brut" front information
-        center : int
-            Position of center in e_r to return.
-        width : int
-            +- pixel to add on left and right of center
-        usi : bool
-            False by default. If true, convert pixel length into meter,
-            and time in second
-
-        """
-        time_ref = int(self.datas['t_ref_calc'].values)
-        px_mm = float(self.datas.iloc[0]['px_mm'])
-
-        zf = zf[time_ref:, :]  # we don't care before time_ref
-
-        r_space = range(center-width, center+width+1)
-        zf_win = np.zeros([len(zf[:, 0]), len(r_space)])
-        zf_win_mean = np.zeros(len(zf[:, 0]))
-        zf_win_std = np.zeros(len(zf[:, 0]))
-
-        for i in range(1, len(zf[:, 0])):
-            for id, val in enumerate(r_space):
-                if zf[i, val] != 0:
-                    zf_win[i, id] = (zf[0, val] - zf[i, val])
-                else:
-                    zf_win[i, id] = np.nan
-
-            zf_win_mean[i] = np.nanmean(zf_win[i, :])
-            zf_win_std[i] = np.nanstd(zf_win[i, :])
-
-        zf_win_mean[0] = 0
-        zf_win_mean[zf_win_mean == np.inf] = np.nan
-
-        if usi:
-            zf_win_mean /= px_mm
-            zf_win_std /= px_mm
-
-        return zf_win_mean, zf_win_std
-
-    def get_fit_front(self, t, zf, rho_s, Lf, k_s, fit_win=[5, 10]):
-        delta = []
-        t0 = []
-        dT = []
-
-        # --- fit with lmfit.model --- #
-        def fit_fun_dir(t, delta, t0):
-            zf = delta**2*(t - t0)
-            return zf
-
-        gmodel = Model(fit_fun_dir)
-        gmodel.eval(
-            t=t[fit_win[0]:-fit_win[1]],
-            delta=1e-4, t0=.1,
-        )
-        result = gmodel.fit(
-            (zf[fit_win[0]:-fit_win[1]])**2,
-            t=t[fit_win[0]:-fit_win[1]],
-            delta=1e-4, t0=.1,
-        )
-        delta.append(result.best_values['delta'])
-        t0.append(result.best_values['t0'])
-        dT.append(delta[0]**2*rho_s*Lf/(2*k_s))
-
-        # --- fit with polyfit --- #
-        p = np.polyfit(
-            t[fit_win[0]:-fit_win[1]],
-            (zf[fit_win[0]:-fit_win[1]]*1e3)**2,
-            1
-        )
-        delta.append(np.sqrt(p[0]*1e-6))
-        t0.append(-p[1]*1e-6/p[0]**2)
-        dT.append(p[0]**2*rho_s*Lf/(2*k_s))
-
-        return delta, t0, dT
-
-    def get_fits(self, t, zf, plot=False):
-        """
-            Return to fit coefficient for t0 t0-1
-        """
-        t0, time_ref, fps = self.get_data(['t0', 'time_ref', 'fps'])
-        t0 -= 1
-        end_time = int(round(len(t)*.15))
-
-        print(zf)
-        print(t0-time_ref)
-        print(end_time)
-
-        def fit_fun_dir(t, Delta):
-            zf_square = Delta*(t)
-            return zf_square
-
-        gmodel = Model(fit_fun_dir)
-        gmodel.eval(
-            t=t[t0-time_ref:-end_time]-(t0-time_ref)/fps,
-            Delta=1e-4,
-        )
-        result = gmodel.fit(
-            (zf[t0-time_ref:-end_time])**2,
-            t=t[t0-time_ref:-end_time]-(t0-time_ref)/fps,
-            Delta=1e-4,
-        )
-        delta_fit = result.best_values['Delta']
-        delta_fit = np.sqrt(delta_fit)
-        print(delta_fit)
-
-        gmodel = Model(fit_fun_dir)
-        gmodel.eval(
-            t=t[t0-time_ref:-end_time]-(t0-1-time_ref)/fps,
-            Delta=1e-4,
-        )
-        result = gmodel.fit(
-            (zf[t0-time_ref:-end_time])**2,
-            t=t[t0-time_ref:-end_time]-(t0-1-time_ref)/fps,
-            Delta=1e-4,
-        )
-        delta_fit_down = result.best_values['Delta']
-        delta_fit_down = np.sqrt(delta_fit_down)
-        print(delta_fit_down)
-
-        if plot:
-            fig, ax0 = plt.subplots(figsize=(20, 10))
-            ax0.plot(t-(t0-time_ref)/fps, zf**2, 'ok', markersize=8, markerfacecolor='None')
-            ax0.plot(
-                t[t0-time_ref:-end_time]-(t0-time_ref)/fps,
-                zf[t0-time_ref:-end_time]**2,
-                '*b',
-            )
-            ax0.plot(
-                t, delta_fit**2*(t-(t0-time_ref)/fps), '--b'
-            )
-            ax0.plot(
-                t[t0-time_ref:-end_time]-(t0-1-time_ref)/fps,
-                (zf[t0-time_ref:-end_time])**2,
-                '*r',
-            )
-            ax0.plot(
-                t, delta_fit_down**2*(t-(t0-1-time_ref)/fps), '--r'
-            )
-
-            fig, ax = plt.subplots(figsize=(20, 10))
-            ax.plot(t, zf, '*k')
-            ax.plot(t, delta_fit*np.sqrt(t-(t0-time_ref)/fps), '--b')
-            ax.plot(t, delta_fit_down*np.sqrt(t-(t0-1-time_ref)/fps), '--r')
-
-            plt.show()
-
     def get_limit_stefan(self, t, zf, plot=False):
         """
             Return curves between t0 & t0+1 of Stefan profile.
@@ -1734,288 +1862,6 @@ class Stack(object):
             )
         )
 
-    def view_dynamic_front(self, zf, fit_win=[0, 10]):
-        """Display front dynamic.
-
-        Parameters
-        ----------
-        zf : ndarray
-            Contain front information
-        fit_win : list of 2 elements
-            Windowing the elements for fit. First element is the number of
-            point to exlude at begin, and second is the number to exclude at
-            the end.
-        plot : bool
-            True by default. Enable to plot results.
-
-        """
-        time_ref = int(self.datas['t_nuc_calc'].values)
-        px_mm = int(self.datas['px_mm'].values)
-        fps = float(self.datas.iloc[0]['fps'])
-        try:
-            Tc = float(self.datas.iloc[0]['Tc_nuc'])
-        except AttributeError:
-            Tc = float(self.datas.iloc[0]['Tc_set'])
-
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-
-        z0 = self.datas['z0'].values
-        r0 = self.datas['r0'].values
-        rc = self.datas['rc'].values
-
-        try:
-            z0 = int(z0)
-            r0 = int(r0)
-            rc = int(rc)
-        except ValueError:
-
-            temp = self.current_image_number
-            self.read_image(0)
-            im = self.current_image.rotate(angle=-ref_pente)
-            self.read_image(temp)
-
-            fig, ax = plt.subplots(1, figsize=[10, 7])
-            ax.imshow(im, cmap='gray')
-
-            dr = drag.DraggableRectangle(ax)
-            plt.show()
-
-            if dr.valid:
-                rect = dr.get_rect()
-                r0 = int((rect[1] - rect[0])/2)
-                rc = int(r0 + rect[0])
-                z0 = int(rect[3] - rect[2])
-
-                print('\tz0 : ', z0)
-                print('\tr0 : ', r0)
-                print('\trc : ', rc)
-
-            self.read_image(temp)
-
-        rho_s = 916.8
-        Lf = 334000.
-        k_s = 2.22
-
-        t_space, zf, zf_mean, zf_std = self.get_dynamic_front(zf)
-
-        t0idx = np.argmin(abs(t_space/fps-fit_win[0]))
-
-        # plot for different rows #
-        # ----------------------- #
-        cols = np.array(
-            np.linspace(rc-r0, rc+r0, 6, endpoint=False),
-            dtype=np.int
-        )
-        cols = np.delete(cols, 0)
-        plt.figure(figsize=[8, 4.5])
-        for col in cols:
-            plt.plot(
-                np.array(t_space)/np.max(t_space),
-                zf[:, col]/z0,
-                's', markerfacecolor='None',
-                label=r'$r/r_0 =$ {0:.2f}'.format((col-rc)/r0)
-            )
-        plt.xlabel(r'$t/t_f$')
-        plt.ylabel(r'$z_f(t)/z_0$')
-        plt.grid(True)
-        plt.legend(loc=0, fancybox=True)
-
-        plt.figure(figsize=[8, 4.5])
-        self.read_image(time_ref+30)
-        im = self.current_image.image
-        plt.imshow(self.current_image.rotate(-ref_pente, im), cmap='gray')
-        for col in cols:
-            plt.plot(
-                [col, col],
-                [0, self.current_image.size[0]],
-                '-.', markersize=2, alpha=.3,
-            )
-
-        """
-        # model and fit comparison #
-        # ------------------------ #
-        # --- fit direct --- #
-        def fit_fun_dir(t, delta, t0):
-            zf = delta**2*(t - t0)
-            return zf
-
-        gmodel = Model(fit_fun_dir)
-        print(zf_mean[fit_win[0]:-fit_win[1]]/px_mm)
-        print(t_space[fit_win[0]:-fit_win[1]]/fps)
-        gmodel.eval(
-            t=t_space[fit_win[0]:-fit_win[1]]/fps,
-            delta=1e-4, t0=.1,
-        )
-        result = gmodel.fit(
-            (zf_mean[fit_win[0]:-fit_win[1]]/px_mm)**2,
-            t=t_space[fit_win[0]:-fit_win[1]]/fps,
-            delta=1e-4, t0=.1,
-        )
-        print(result.fit_report())
-        print(result.best_values)
-        delta = result.best_values['delta']
-        t0 = result.best_values['t0']
-        dT_dir = delta**2*rho_s*Lf/(2*k_s)
-
-        # --- fit **2 -- #
-        def fit_fun(t, delta, t0):
-            zf_square = delta**2*(t - t0)
-            return zf_square
-
-        popt, pcov = curve_fit(
-            fit_fun,
-            t_space[fit_win[0]:-fit_win[1]]/fps,
-            (zf_mean[fit_win[0]:-fit_win[1]]/px_mm*1e3)**2,
-            bounds=(
-                [0, 0],
-                [np.inf, 6/fps]
-            ),
-            p0=[1e-4, t_space[fit_win[0]]/fps - 1/(2*fps)],
-        )
-        popt[0] = popt[0]*1e-3
-
-        dT_square = popt[0]**2*rho_s*Lf/(2*k_s)
-        perr = np.sqrt(np.diag(pcov))
-        print(
-            [0, t_space[fit_win[0]]/fps-fps],
-            [np.inf, t_space[fit_win[0]]/fps]
-        )
-        print('Error :{}'.format(perr))
-
-        p = np.polyfit(
-            t_space[fit_win[0]:-fit_win[1]]/fps,
-            (zf_mean[fit_win[0]:-fit_win[1]]/px_mm*1e3)**2,
-            1
-        )
-        p[0] = np.sqrt(p[0]*1e-6)
-        p[1] = -p[1]*1e-6/p[0]**2
-        dT_poly = p[0]**2*rho_s*Lf/(2*k_s)
-        """
-
-        # -- plot fig --- #
-        plt.figure(figsize=(8, 4.5))
-        plt.errorbar(
-            t_space/fps - 0/fps,
-            zf_mean/px_mm,
-            yerr=(zf_std+5)/px_mm,
-            linestyle="None",
-            marker='s',
-            markersize=4, markerfacecolor='None'
-        )
-        plt.plot(
-            t_space[t0idx:-fit_win[1]]/fps - 0/fps,
-            zf_mean[t0idx:-fit_win[1]]/px_mm,
-            '.r', markersize=4,
-            label='Considered point for fitting'
-        )
-
-        z = np.polyfit(t_space[t0idx:-fit_win[1]]/fps, zf_mean[t0idx:-fit_win[1]]/px_mm, 1)
-        p = np.poly1d(z)
-        plt.plot(t_space/fps, p(t_space/fps), '--k', label='qw = '+str(z[0]*rho_s*Lf))
-
-        """
-        # --- fit dir --- #
-        plt.plot(
-            t_space[fit_win[0]:-fit_win[1]]/fps,
-            delta*np.sqrt(t_space[fit_win[0]:-fit_win[1]]/fps-t0),
-            'r-',
-            label=r'lmodel $z_f^2 = \delta^2(t-t_0)$, $\delta$ = {:.1e}, $t_0$ = {:.1e}, $\Delta T$ = {:.1e}'.format(
-                delta, t0, dT_dir
-            )
-        )
-        """
-
-        """
-        # --- fit **2 ---#
-        plt.plot(
-            t_space/fps,
-            popt[0]*np.sqrt(t_space/fps - popt[1]),
-            '-.r',
-            label=r'curve_fit $z_f^2 = \delta^2(t-t_0)$, $\delta$ = {:.1e}, $t_0$ = {:.1e}, $\Delta T$ = {:.1e}'.format(
-                popt[0], popt[1], dT_square
-            )
-        )
-        """
-
-        """
-        plt.plot(
-            t_space/fps,
-            p[0]*np.sqrt(t_space/fps - p[1]),
-            '-.m',
-            label=r'polyfit $z_f^2 = \delta^2*t - z0$, $\delta$ = {:.1e}, $t_0$ = {:.1e}, $\Delta T$ = {:.1e}'.format(
-                p[0], p[1], dT_poly
-            )
-        )
-        """
-
-        """
-        # theoritical plot #
-        # ---------------- #
-        liquid = ste2.Material()
-        liquid.set_data([998, 4200, 0.5])
-        ice = ste2.Material()
-        ice.set_data([910, 2050, 2.22])
-        liquid_ice = ste2.PhaseTransitonMaterial(liquid, ice)
-        liquid_ice.set_melting_temperature(0)
-        liquid_ice.set_heat_latent(335000)
-        th = ste2.Stefan(liquid_ice)
-        zf = th.monophasic_steady(Tc, z0=2.2e-3)
-
-        plt.plot(
-            np.arange(len(zf))*th.dt,  # + popt[1]
-            zf,
-            '--k',
-            label=(
-                r'Theoretical front $\delta$ = {:.1e}'.format(
-                    np.sqrt(2*-Tc*k_s/(rho_s*Lf))
-                )
-            )
-        )
-        """
-
-        plt.grid(True)
-        plt.legend(fancybox=True)
-
-        plt.xlabel('Time (s)')
-        plt.ylabel('Distance (m)')
-
-        plt.tight_layout()
-
-        plt.figure(figsize=[8, 4.5])
-        ax = plt.axes()
-        ax.plot(t_space/fps, zf_std/px_mm*1e3, 'sb', mfc='none')
-        ax.set_ylabel('t (s)')
-        ax.set_ylabel('zf_std (mm)')
-        ax.grid(True)
-
-        plt.show()
-
-        # return -Tc-dT_poly
-
-    def define_geometry(self):
-        ref_pente = float(self.datas.iloc[0]['alpha'])
-        temp = self.current_image_number
-        self.read_image(0)
-        im = self.current_image.rotate(angle=-ref_pente)
-        self.read_image(temp)
-
-        fig, ax = plt.subplots(1, figsize=[10, 7])
-        ax.imshow(im, cmap='gray')
-
-        dr = drag.DraggableRectangle(ax)
-        plt.show()
-
-        if dr.valid:
-            rect = dr.get_rect()
-            r0 = int((rect[1] - rect[0])/2)
-            rc = int(r0 + rect[0])
-            z0 = int(rect[3] - rect[2])
-
-            print('\tz0 : ', z0)
-            print('\tr0 : ', r0)
-            print('\trc : ', rc)
-            print('Please add this value in the table')
-
     def unfrosting_front(self, zf):
         time_ref = int(self.datas['t_nuc_calc'].values)
         px_mm = 140000  # int(self.datas['px_mm'].values)
@@ -2029,261 +1875,6 @@ class Stack(object):
         z0 = self.datas['z0'].values
         r0 = self.datas['r0'].values
         rc = self.datas['rc'].values
-
-    def get_contour(self, fac=1, plot=True):
-        """
-        Determine the contour of the current images.
-
-        Please provide x, ymin and ymax from set_contour_ref().
-        """
-        gradient_im = self.current_image.gradient(
-            type='sobel', size=5
-        )
-
-        plt.figure()
-        plt.imshow(gradient_im, cmap='gray')
-        plt.title('gradient image')
-
-        thres = np.median(gradient_im) + 3/4*np.std(gradient_im)
-        im_bw = gradient_im
-        im_bw[im_bw < thres] = 0
-        im_bw[im_bw > 0] = 1
-
-        plt.figure()
-        plt.imshow(im_bw, cmap='gray')
-        plt.title('binary image')
-
-        im_er = morphology.binary_erosion(
-            np.array(im_bw, dtype=bool),
-            morphology.square(2)
-        )
-
-        plt.figure()
-        plt.imshow(im_er, cmap='gray')
-        plt.title('first erosion image')
-
-        im_fill = np.array(im_er, dtype=np.int)
-        im_fill = morph.binary_fill_holes(im_er)
-        # im_fill = np.array(im_fill, dtype=np.int)
-        # im_fill = morphology.binary_fill_holes(im_er).as_type(int)
-
-        plt.figure()
-        plt.imshow(im_fill, cmap='gray')
-        plt.title('fill holes image')
-
-        im_rm = morphology.remove_small_objects(
-            im_fill, 6
-        )
-
-        plt.figure()
-        plt.imshow(im_rm, cmap='gray')
-        plt.title('remove small objects < 6')
-
-        im_rm = np.array(im_rm, dtype=np.int16)
-        labels = measure.label(im_rm)
-        regions = measure.regionprops(labels)
-
-        markers = np.array([r.centroid for r in regions]).astype(np.uint16)
-        marker_image = np.zeros_like(im_rm, dtype=np.int64)
-        marker_image[markers[:, 0], markers[:, 1]] = np.arange(len(markers)) + 1
-
-        distance_map = ndimage.distance_transform_edt(1 - im_rm)
-
-        filled = morphology.watershed(1 - distance_map, markers=marker_image)
-
-        filled_connected = measure.label(filled != 1, background=0) + 1
-
-        filled_regions = measure.regionprops(filled_connected)
-        mean_area = np.mean([r.area for r in filled_regions])
-        filled_filtered = filled_connected.copy()
-        for r in filled_regions:
-            if r.area < 0.25 * mean_area:
-                coords = np.array(r.coords).astype(int)
-                filled_filtered[coords[:, 0], coords[:, 1]] = 0
-
-        f, (ax0, ax1, ax2) = plt.subplots(1, 3)
-        ax0.imshow(im_rm, cmap='gray')
-        ax1.imshow(filled_filtered, cmap='Blues')
-        ax2.imshow(distance_map, cmap='gray')
-
-        im_er2 = morphology.binary_erosion(
-            image=im_fill,
-            selem=morphology.square(4)
-        )
-
-        plt.figure()
-        plt.imshow(im_er2, cmap='gray')
-        plt.title('2nd erosion image')
-
-        im_dilate = morphology.binary_dilation(
-            im_er2,
-            morphology.square(2)
-        )
-
-        plt.figure()
-        plt.imshow(im_dilate, cmap='gray')
-        plt.title('last dilatation image')
-
-        Cx = Cy = np.array([])
-        for i in range(0, self.current_image.size[1]-4, 1):
-            it = im_dilate[:, i]
-            if np.argmax(it) > 0:
-                Cx = np.append(Cx, i)
-                Cy = np.append(Cy, np.argmax(it))
-
-        if plot:
-            fig, ax = plt.subplots(figsize=(11, 7))
-            fig.canvas.set_window_title(
-                'Contour visualisation - image {:s}'.format(
-                    str(self.current_image_number)
-                )
-            )
-
-            ax.imshow(self.current_image.image, cmap='gray')
-            ax.plot(
-                Cx,
-                Cy,
-                '.g', markersize='3',
-                label='Contour2 detected'
-            )
-
-            plt.legend(fancybox=True, shadow=True)
-            plt.grid(True)
-            plt.show()
-
-        return Cx, Cy
-
-    def get_contour2(self):
-        import cv2
-        im = self.current_image.image
-        plt.imshow(im, cmap='gray')
-        print(np.max(im), np.min(im))
-
-        im = np.array(self.current_image.image*255, dtype=np.uint8)
-        cv2.imshow("Image", im)
-        cv2.waitKey(0)
-
-        print(np.mean(im))
-
-        ret, thresh = cv2.threshold(im, np.uint8(np.mean(im)), 255, 0)
-
-        cv2.imshow("threshold image", thresh)
-        cv2.waitKey(0)
-
-        im2, contours, hierarchy = cv2.findContours(
-            thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        cnt = contours[0]
-        print(cnt)
-        cv2.drawContours(im, contours, -1, (0, 255, 0), 3)
-        cv2.waitKey(0)
-
-    def get_contours(self, fac=1):
-        """Determine contour for all images."""
-        temp = self.current_image_number
-        widgets = ['Detecting contour',
-                   ' ', progressbar.Percentage(),
-                   ' ', progressbar.Bar('=', '[', ']'),
-                   ' ', progressbar.ETA(),
-                   ' ', progressbar.FileTransferSpeed()]
-        pbar = progressbar.ProgressBar(
-            widgets=widgets, maxval=len(self.image_list)
-        )
-        pbar.start()
-
-        for i in range(len(self.image_list)):
-            self.read_image(i, _hist=False)
-            Cx, Cy = self.get_contour(fac=fac, _hist=False)
-            if i < 9:
-                np.save(
-                    self.contour_directory + '/000' + str(i+1) + '_Cx',
-                    Cx
-                )
-                np.save(
-                    self.contour_directory + '/000' + str(i+1) + '_Cy',
-                    Cy
-                )
-            elif i < 99:
-                np.save(
-                    self.contour_directory + '/00' + str(i+1) + '_Cx',
-                    Cx
-                )
-                np.save(
-                    self.contour_directory + '/00' + str(i+1) + '_Cy',
-                    Cy
-                )
-            elif i < 999:
-                np.save(
-                    self.contour_directory + '/0' + str(i+1) + '_Cx',
-                    Cx
-                )
-                np.save(
-                    self.contour_directory + '/0' + str(i+1) + '_Cy',
-                    Cy
-                )
-            pbar.update(i)
-        pbar.finish()
-        self.read_image(temp)
-
-    def display_contour(self, ni=-1, ref=False):
-        """
-        Display image with the contour.
-
-        If ni = -1, displays the current_image, else displays image ni
-        """
-        if ni > -1:
-            self.read_image(ni)
-
-        if self.current_image_number < 9:
-            Cx = np.load(
-                self.data_directory + 'contour/' + '000' +
-                str(self.current_image_number+1) + '_Cx' +
-                '.npy'
-            )
-            Cy = np.load(
-                self.data_directory + 'contour/' + '000' +
-                str(self.current_image_number+1) + '_Cy' +
-                '.npy'
-            )
-        elif self.current_image_number < 99:
-            Cx = np.load(
-                self.data_directory + 'contour/' + '00' +
-                str(self.current_image_number+1) + '_Cx' +
-                '.npy'
-            )
-            Cy = np.load(
-                self.data_directory + 'contour/' + '00' +
-                str(self.current_image_number+1) + '_Cy' +
-                '.npy'
-            )
-        elif self.current_image_number < 999:
-            Cx = np.load(
-                self.data_directory + 'contour/' + '0' +
-                str(self.current_image_number+1) + '_Cx' +
-                '.npy'
-            )
-            Cy = np.load(
-                self.data_directory + 'contour/' + '0' +
-                str(self.current_image_number+1) + '_Cy' +
-                '.npy'
-            )
-
-        fig = plt.figure(figsize=(11, 7))
-        fig.canvas.set_window_title(
-            'Image with contour n°' + str(self.current_image_number)
-        )
-        plt.imshow(self.current_image.image, cmap='gray')
-        plt.plot(
-            Cx, Cy,
-            '.', markersize=5, color='#BB0029', alpha=.4,
-            label='Contour'
-        )
-        plt.legend(shadow=True, fancybox=True, loc='best')
-        plt.show()
-        print(Cy)
-        s = sum(Cy)
-        print(s)
 
     def _rot_inv(self, x_rot, y_rot, angle):
         a = angle * np.pi / 180
@@ -2330,47 +1921,59 @@ class GetFolderName(QWidget):
 if __name__ == '__main__':
     # data example
     # ------------
-    data = Data()
-    print(data)
-
-    data.data['t_nuc_mes'] = '00:12:30'
-    print(data.data['t_nuc_mes'])
-    data.data['date'] = '11-07-2019'
-    data.data['serie'] = 1
-    print(data)
-    print(data.data['rr'])
+    # data = Data()
+    # print(data)
+    #
+    # data.data['t_nuc_mes'] = '00:12:30'
+    # print(data.data['t_nuc_mes'])
+    # data.data['date'] = '11-07-2019'
+    # data.data['serie'] = 1
+    # print(data)
+    # print(data.data['rr'])
 
     # stack example
     # -------------
-    # instance stack
     stack = Stack()
-    print(stack)
 
     # read an experiment
-    stack.read_by_date('17-10-2018', 1)
-    stack.print_info()
+    # ==========
+    stack.read_by_date('20-11-2018', 9)
+    # stack.print_info()
 
     # load the images
+    # ==========
     stack.load_images()
-    stack.print_info()
-    stack.select_image(23)
-    stack.show_image()
+    # stack.print_info()
+    # stack.select_image(23)
+    # stack.show_image()
 
     # make treatement
-    stack.rotate()
-    stack.crop()
-    stack.show_image()
-    stack.clahe()
-    stack.show_image()
+    # =========
+    # stack.crop()
+    # stack.rotate()
+    # stack.clahe()
+    # stack.show_image()
 
     # pre-info on drop
-    stack.get_geometry_by_rectangle()
+    # =========
+    # stack.get_geometry_by_rectangle()
 
     # tracking drop geom/contour & front
-    stack.track_geometry()
-    stack.track_contour()
-    stack.track_front()
+    # ========
+    # stack.track_geometry()
+    # stack.track_contour()
+    # stack.track_front()
 
     stack.contour.plot()
     stack.contour.plot_volume()
-    stack.front.plot()
+    stack.front.plot(dt=1)
+    stack.plot_vol_mean_front_comparison()
+    stack.front_profile(dt=2)
+    stack.plot_dynamic_mean_front()
+    stack.plot_mean_vs_loc_kinetics()
+    stack.fit_mean_kinetic(.7)
+    stack.make_montage()
+    log(stack.get_t12(True))
+    log(stack.get_tf(True))
+    log(stack.get_tz0(True))
+    log(stack.get_qa())

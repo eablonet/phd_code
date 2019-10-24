@@ -34,7 +34,7 @@ Lf = 3.35e5
 Ste = cpi*(Tm - Tw)/Lf
 Stea = cpa*(Ta_inf - Tm)/Lf
 Stel = cpl*(Ta_inf - Tm)/Lf
-delta = np.arange(5e-5, 1e-3, 3e-5)
+delta = np.linspace(4.7e-5, 1e-3, 2)
 
 print('delta : ', delta)
 
@@ -45,7 +45,8 @@ for d in delta:
     z_appro = [0]
     z = [0]
     t = [0]
-    for i in range(int(5e4)):
+    print(delta)
+    for i in range(int(1e5)):
         t.append(t[-1]+dt)
         # zi = sqrt(
         #     z_appro[i]**2 + 2*dt*(
@@ -68,13 +69,35 @@ for d in delta:
     tz0.append(t[argmin(np.abs(z0 - np.array(z)))])
     tz0_th.append(t[argmin(abs(z0 - sqrt(2*Di*Ste)*sqrt(t)))])
 
-print(tz0)
 plt.figure()
-plt.plot(ka*(Ta_inf - Tm)/delta, np.array(tz0)/tz0_th[0], '--ok')
+plt.plot(ka*(Ta_inf - Tm)/delta, np.array(tz0)/tz0_th[0], '--k')
+plt.xlabel('qa(z0)')
+plt.ylabel('tz0/tz0_th')
 plt.show()
 
-print(ki*(-Tw)/3e-3)
 
+phi = [
+    41.7, 42.7, 45, 54.5, 55.7,
+    # 72
+]
+tz0 = [1.25, 1.36, 1.33, 1.68, 1.88, 3.3]
+q = [
+    4100, 5300, 4900, 8100, 9030,
+    # 0
+]
+
+plt.figure()
+plt.plot(phi, q, '.k')
+plt.xlabel(r'$\phi$')
+plt.ylabel(r'$q_a$')
+plt.grid(True)
+
+
+z = np.polyfit(phi, q, 1)
+p = np.poly1d(z)
+print(z)
+plt.plot(phi, p(phi), '--r')
+plt.show()
 """
 
 plt.figure(figsize=(8, 4.5))

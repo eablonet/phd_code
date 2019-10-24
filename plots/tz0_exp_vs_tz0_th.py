@@ -19,7 +19,8 @@ z_lookfor12 = .5
 z_lookforz0 = 1
 
 # ice
-ice = ma.Ice()
+ice = ma.Water()
+ice.set_phase('solid')
 rho = ice.get_rho()
 k = ice.get_k()
 cp = ice.get_cp()
@@ -27,6 +28,7 @@ Lf = 333500
 
 # water (check values)
 water = ma.Water()
+water.set_phase('liquid')
 rho_l = water.get_rho()
 k_l = water.get_k()
 cp_l = water.get_cp()

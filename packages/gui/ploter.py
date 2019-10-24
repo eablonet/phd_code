@@ -9,7 +9,7 @@ class Figure:
 
     def __init__(self):
         """Create a figure."""
-        self.fig = plt.figure(figsize=(8, 4.5))
+        self.fig = plt.figure(figsize=(8, 4.5), constrained_layout=True)
         self.ax = []
 
     def __len__(self):
@@ -28,6 +28,27 @@ class Figure:
         """Convert add_subplot method."""
         self.ax.append(Ax(self.fig.add_subplot(n)))
         return self.ax[-1]
+
+    def colorbar(self, mapname, values, clabel=None, ticks=None, ticklabels=None):
+        """Add a colorbar."""
+        cmap = plt.cm.get_cmap(mapname, len(values))
+        # Make dummie mappable
+        x, _ = self.ax[-1].ax.get_xlim()
+        y, _ = self.ax[-1].ax.get_ylim()
+        x = [x for _ in range(len(values))]
+        y = [y for _ in range(len(values))]
+        dummie_cax = self.ax[-1].ax.scatter(
+            x, y, c=range(len(values)), cmap=cmap
+        )
+
+        cbar = self.fig.colorbar(dummie_cax)
+        dummie_cax.set_visible(False)
+
+        if clabel is not None:
+            cbar.set_label(clabel)
+
+        cbar.set_ticks([0, len(values)-1])
+        cbar.set_ticklabels([values[0], values[-1]])
 
 
 class Ax:
@@ -49,12 +70,20 @@ class Ax:
         """Add a plot."""
         self.ax.plot(*args, lw=2, ms=8, **kwargs)
 
+    def loglog(self, *args, **kwargs):
+        """Add a loglog."""
+        self.ax.loglog(*args, lw=2, ms=8, **kwargs)
+
     def legend(self, **kwargs):
         """Enable legend."""
         self.ax.legend(
             fancybox=True, shadow=True,
             **kwargs
         )
+
+    def imshow(self, *args, **kwargs):
+        """Add a loglog."""
+        self.ax.imshow(*args, cmap='gray', **kwargs)
 
     def xlabel(self, txt):
         """Set xlabel."""
@@ -63,6 +92,10 @@ class Ax:
     def ylabel(self, txt):
         """Set ylabel."""
         self.ax.set_ylabel(txt, fontsize=14)
+
+    def title(self, *args, **kwargs):
+        """Define axe title."""
+        self.ax.set_title(*args, fontsize=14, **kwargs)
 
 
 if __name__ == '__main__':
@@ -90,4 +123,24 @@ if __name__ == '__main__':
     ax.ylabel('Energie')
 
     # display figure
+    fig.show()
+
+    # colorbar
+    fig = Figure()
+    fig.set_win_title('Gallery figure')
+    ax = fig.add_ax(111)
+    import numpy as np
+    t = np.linspace(0, 2, 100)
+    cmap = plt.get_cmap('tab10', 4)
+    for T in range(1, 5):
+        y = np.cos(2*np.pi*t/T)
+        ax.plot(
+            t, y,
+            color=cmap(T-1)
+        )
+    fig.colorbar(
+        mapname='tab10', values=range(1, 5),
+        ticks=range(1, 5),
+        ticklabels=['1']
+    )
     fig.show()

@@ -38,7 +38,7 @@ class Load:
         self.stefan[-1].boundaries = [0, 0]
         self.stefan[-1].set_geometry(H=[0, (self.stack[-1].geom.zb - self.stack[-1].geom.z0)/self.stack[-1].data.data['px_mm'], 0], unit='m')
         self.stefan[-1].set_time_condition(auto=True)
-        self.stefan[-1].boundValues = [self.stack[-1].data.Tcnuc, 0]
+        self.stefan[-1].boundValues = [self.stack[-1].data.Tnuc, 0]
 
 
     def filter_db(self, criterium, value):
@@ -151,9 +151,9 @@ class Load:
         qste = []
         for i, s in enumerate(self.stack):
             phi.append(np.float(s.data.data['phi_chamber'].replace(',', '.')))
-            qa.append(s.get_qa())
+            qa.append(s.get_qa(N=50))
             z0 = (s.geom.zb-s.geom.z0)/s.data.data['px_mm']
-            qste.append(2.2*(0-s.data.Tcnuc)/z0)
+            qste.append(2.2*(0-s.data.Tnuc)/z0)
 
         ax.plot(phi, np.abs(qa), 'sk', mfc='None')
         p = np.polyfit(phi, np.abs(qa), 1)
@@ -171,21 +171,37 @@ class Load:
         ax.ylabel(r'$q_a / q_{S_{te}}$')
         fig.show()
 
+    def Ta_max_phi(self):
+        """Plot Ta_max vs phi."""
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        phi = []
+        Tamax = []
+        for i, s in enumerate(self.stack):
+            phi.append(np.float(s.data.data['phi_chamber'].replace(',', '.')))
+            s.get_qa()
+            Tamax.append(np.max(s.stefan.fields.T))
+
+        ax.plot(phi, np.abs(Tamax), 'sk', mfc='None')
+        ax.xlabel(r'$\phi$ (%)')
+        ax.ylabel(r'$T_{a,max} (W/m^2)$')
+        fig.show()
+
 
 if __name__ == '__main__':
     date = [
         '15-10-2018', '15-10-2018', '15-10-2018', '15-10-2018',
         '17-10-2018', '17-10-2018', '17-10-2018', '17-10-2018', '17-10-2018',
         '22-10-2018', '22-10-2018',
-        '20-11-2018', '20-11-2018',	'20-11-2018',
-        '22-11-2018', '22-11-2018'
+        # '20-11-2018', '20-11-2018',	'20-11-2018',
+        # '22-11-2018', '22-11-2018'
     ]
     serie = [
         1, 3, 5, 11,
         1, 3, 5, 7, 9,
         3, 7,
-        5, 7, 9,
-        3, 5
+        # 5, 7, 9,
+        # 3, 5
     ]
 
     gest = Load()
@@ -197,3 +213,4 @@ if __name__ == '__main__':
     gest.kinetic_adim_zO_tz0()
     gest.tz0_repr()
     gest.qa_phi()
+    gest.Ta_max_phi()

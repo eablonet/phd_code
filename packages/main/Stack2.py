@@ -619,7 +619,7 @@ class Data:
             return self.data['fps_real']
 
     @property
-    def Tcnuc(self):
+    def Tnuc(self):
         """Return Nucleation temperature."""
         if self.data['Tc_nuc'] is None:
             return self.data['Tc_set']
@@ -1395,18 +1395,117 @@ class Stack(object):
         ax.ylabel(r'$z_i(m)$')
         fig.show()
 
-    def get_qa(self, eps=.1):
-        """Return the closer qa to fit tz0."""
+    def get_qa(self, init_val=-7000, eps=.1, N=100):
+        """Return the closer qa to fit tz0.
+
+        input
+        -----
+            init_val : float
+                Init air-liquid flux value.
+            eps : float
+                Precision of solving Dtz0 < eps
+            N : int
+                Maximum step calculation
+        """
         tz0 = self.get_tz0(usi=True)
 
         s = ste.Stefan()
-        qa = -2000
+        qa = init_val
+        c = 0  # compteur pour itération maximale < N
 
+        # init solver
+        # -----------
         s.solver = [0, 1, 1, 0]  # air, liq, ice, subs
         s.dilatation = False
         s.boundaries = [0, 2]  # bottom, top
-        s.boundValues = [-10, qa]  # bottom, top
+        s.boundValues = [self.data.Tnuc, qa]  # bottom, top
         z0 = (self.geom.zb - self.geom.z0)/self.data.data['px_mm']
+        s.set_geometry(
+            H=[0, z0*1e3, 0], dz=[0, .005, 0], unit='mm'
+        )  # air, liq, sub
+        s.set_time_condition(
+            ts=0, tend=self.get_tf(usi=True),
+            dt=.1,
+            auto=False
+        )  # times
+        s.solve()
+
+        b0 = 2e12  # ecart of tz0/tz0_ste from 1, init at infinity
+        print('Solving qa, please wait...')
+
+        # loop optimize qa
+        # ----------------
+        while abs(s.tz0 - tz0) > eps and c < N:
+            # if stefan.tz0 > tz0 => qa might decrease
+            # else stefan.tz0 > tz0 => might increase
+            if abs(tz0/s.tz0-1) < abs(b0):
+                b1 = tz0/s.tz0-1
+            else:
+                b1 = b0
+
+            if b1*b0 < 0:
+                # changement de signe (on passe d'une surestimation
+                # à une sous estimation ou le contraire)
+                b0 = b1
+                qa1 = qa*(b0+1)
+                qa = (qa + qa1)/2
+            else:
+                # on continue de sous estimer ou du surestimer
+                b0 = b1
+                qa *= b0+1
+
+            s.boundValues[1] = qa
+            s.solve()
+
+            log('\tqa : ', qa)
+            log('\ttz0 / tz0.ste : ', tz0, s.tz0)
+            c += 1
+
+        return qa
+
+    def get_T_for_airflux(self):
+        """Return heat field for flux condition at air-liq interface."""
+        # load values
+        # -----------
+        qa = self.get_qa()
+        z0 = (self.geom.zb - self.geom.z0)/self.data.data['px_mm']
+
+        # init solver
+        # ----------
+        s = ste.Stefan()
+        s.solver = [0, 1, 1, 0]  # air, liq, ice, subs
+        s.dilatation = False
+        s.boundaries = [0, 2]  # bottom, top
+        s.boundValues = [self.data.Tnuc, qa]  # bottom, top
+        s.set_geometry(
+            H=[0, z0*1e3, 0], dz=[0, .005, 0], unit='mm'
+        )  # air, liq, sub
+        s.set_time_condition(
+            ts=0, tend=self.get_tf(usi=True),
+            dt=.1,
+            auto=False
+        )  # times
+
+        # solve
+        # -----
+        s.solve()
+
+        return s.fields.T
+
+    def get_zi_for_airflux(self):
+        """Return ice front position for flux condition at air-liq interface."""
+        # load values
+        # -----------
+        qa = self.get_qa()
+        z0 = (self.geom.zb - self.geom.z0)/self.data.data['px_mm']
+
+        # init solver
+        # ----------
+        s = ste.Stefan()
+        s.solver = [0, 1, 1, 0]  # air, liq, ice, subs
+        s.dilatation = False
+        s.boundaries = [0, 2]  # bottom, top
+        s.boundValues = [self.data.Tnuc, qa]  # bottom, top
         s.set_geometry(
             H=[0, z0*1e3, 0], dz=[0, .005, 0], unit='mm'
         )  # air, liq, sub
@@ -1417,23 +1516,8 @@ class Stack(object):
         )  # times
 
         s.solve()
-        b0 = 2e12
-        print('Solving qa, please wait...')
-        while abs(s.tz0 - tz0) > eps:
-            if abs(tz0/s.tz0-1) < abs(b0):
-                b1 = tz0/s.tz0-1
-            if b1*b0 < 0:  # changement de signe
-                b0 = b1
-                qa1 = qa*(b0+1)
-                qa = (qa + qa1)/2
-            else:
-                b0 = b1
-                qa *= b0+1
-            # if stefan.tz0 > tz0 => qa might decrease
-            # else stefan.tz0 > tz0 => might increase
-            s.boundValues[1] = qa
-            s.solve()
-        return qa
+
+        return s.fields.T
 
     def get_tz0(self, usi=False):
         """Return tz0 time."""
@@ -1937,7 +2021,7 @@ if __name__ == '__main__':
 
     # read an experiment
     # ==========
-    stack.read_by_date('20-11-2018', 9)
+    stack.read_by_date('22-10-2018', 7)
     # stack.print_info()
 
     # load the images

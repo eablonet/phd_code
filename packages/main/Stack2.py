@@ -437,6 +437,45 @@ class Contour:
         if not add_to_ax:
             fig.show()
 
+    def tip_angle(self, n=20, kind=1):
+        """Return tip angle."""
+        a = []
+        for nt in range(len(self.xl)):
+            xl = self.xl[nt][-n:]
+            yl = self.yl[nt][-n:]
+            xr = self.xr[nt][:n]
+            yr = self.yr[nt][:n]
+
+            pl = np.polyfit(xl, yl, kind)
+            pr = np.polyfit(xr, yr, kind)
+            if kind == 1:
+                tl = np.arctan(pl[0])
+                tr = np.arctan(pr[0])
+            elif kind == 2:
+                tl = np.arctan(2*pl[0]*xl[-1]+pl[1])
+                tr = np.arctan(2*pr[0]*xl[-1]+pr[1])
+            elif kind == 3:
+                tl = np.arctan(3*pl[0]*xl[-1]**2 + 2*pl[1]*xl[-1] + pl[2])
+                tr = np.arctan(3*pr[0]*xl[-1]**2 + 2*pr[1]*xl[-1] + pr[2])
+
+            # tip angle
+            a.append(np.pi - (abs(tl)+abs(tr)))
+
+        return np.array(a)/np.pi*180
+
+    def plot_tip_angle(self, fps=1):
+        """Display tip angle."""
+        a = self.tip_angle()
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        ax.plot(
+            np.arange(self.time)/fps, a,
+            ls='none', marker='o',
+            color='tab:blue', mfc='none'
+        )
+        ax.ylabel('Angle au sommet (°)')
+        ax.xlabel('Temps (s)')
+        fig.show()
 
 class DataDict(dict):
     """Defin my own dict."""
@@ -696,7 +735,6 @@ class Stack(object):
 
         """
         df = rd.get_data()  # read data in googlesheet.
-
         for _, row in df.iterrows():
             cond = (
                 row['date'] == date and
@@ -1107,7 +1145,7 @@ class Stack(object):
             # update Stefan values
             # -------------
             self.stefan.set_geometry(
-                H=[0, (self.zb - self.z0)/self.data.data['px_mm'], 0],
+                H=[0, (self.geom.zb - self.geom.z0)/self.data.data['px_mm'], 0],
                 dz=[0, .005, 0],
                 unit='mm'
             )
@@ -1519,6 +1557,21 @@ class Stack(object):
 
         return s.fields.T
 
+    @property
+    def dt0(self):
+        """Return dt0 value."""
+        dt0 = int(
+                self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc']
+                - 1
+            ) / self.data.fps
+        return dt0
+
+    @property
+    def z0(self, usi=False):
+        """Return the value of z0, with the contour detection."""
+        z0 = self.geom.zb - self.contour.yl[0][-1]
+        return z0 if usi is False else z0/self.data.data['px_mm']
+
     def get_tz0(self, usi=False):
         """Return tz0 time."""
         z0 = (self.geom.zb - self.geom.z0) / self.data.data['px_mm']
@@ -1531,7 +1584,17 @@ class Stack(object):
 
     def get_tz0ste(self):
         """Return theoretical Stefan time."""
-        return self.stefan.tz0
+        s = ste.Stefan()
+        s.solver = [0, 0, 2, 0]
+        s.dilatation = False
+        s.boundaries = [0, 0]  # bottom, top
+        s.boundValues = [self.data.Tnuc, 0]  # bottom, top
+        s.set_geometry(
+            H=[0, self.get_z0(usi=True)*1e3, 0],
+            dz=[0, .05, 0], unit='mm'
+        )
+        s.set_time_condition(ts=0, tend=100, dt=.01, auto=True)
+        return s.tz0
 
     def get_t12(self, usi=False):
         """Return tz0 time."""
@@ -1724,9 +1787,6 @@ class Stack(object):
         pbest, _ = optimize.curve_fit(
             fit_best, tlog, ylog
         )
-        time_fit = np.linspace(0, np.max(time-dt0), 100)
-        y_t12 = 10**(p12[0])*time_fit**(1/2)
-        y_best = 10**(pbest[1])*time_fit**(pbest[0])
 
         # log('fit : ', popt[0])
         # log('10**fit : ', 10**popt[0])
@@ -1734,6 +1794,19 @@ class Stack(object):
         # log('time_fit**(1/2): ', time_fit**(1/2))
         # log('10**(fit)*time_fit**(1/2): ', 10**popt[0]*time_fit**(1/2))
 
+        return p12, pbest
+
+    def plot_fit(self, cut=.8):
+        """Display fit representation."""
+        p12, pbest = self.fit_mean_kinetic(win=cut)
+        y_mean, _ = self.get_dynamic_mean_front()
+        time = np.arange(len(y_mean)) / self.data.fps
+        dt0 = int(
+                1 + self.data.data['t_nuc_calc'] - self.data.data['t_ref_calc']
+            ) / self.data.fps
+        time_fit = np.linspace(0, np.max(time-dt0), 100)
+        y_t12 = 10**(p12[0])*time_fit**(1/2)
+        y_best = 10**(pbest[1])*time_fit**(pbest[0])
         # display figure
         # --------------
         fig = pl.Figure()
@@ -1758,9 +1831,6 @@ class Stack(object):
         ax.ylabel('Height (m)')
         fig.show()
 
-        return p12, pbest
-    # to check if to keep or to erase
-
     def make_montage(self, front=True, contour=True):
         """Create a montage.
 
@@ -1772,13 +1842,13 @@ class Stack(object):
             Enable contour diplaying
 
         """
-        tnuc = self.data.data['t_ref_calc']
+        tnuc = self.data.data['t_nuc_calc']
         tend = self.data.data['t_end_calc']
         dt = int((tend-tnuc)/5)
 
         fig = pl.Figure()
         ax = []
-        time = np.int64(np.append(tnuc + np.arange(5)*dt, tend))
+        time = np.int64(np.append(tnuc-4 + np.arange(5)*dt, tend+4))
         cmap = plt.get_cmap('coolwarm', 6)
         for i, t in enumerate(time):
             ax.append(fig.add_ax(231+i))
@@ -1799,10 +1869,56 @@ class Stack(object):
                     ls='--', color=cmap(i), alpha=.5
                 )
             ax[-1].ax.axis('off')
-            ax[-1].title('t : {:.1f}s'.format((t - tnuc)/ self.data.fps))
+            ax[-1].title('t : {:.1f}s'.format((t - tnuc) / self.data.fps))
             ax[-1].ax.grid(False)
         fig.show()
 
+    def make_image(self, front=True, contour=True, t=11.75):
+        """Create a montage.
+
+        Parameters
+        ----------
+        front : bool
+            Enable front diplaying
+        contour : bool
+            Enable contour diplaying
+
+        """
+        tref = self.data.data['t_ref_calc']
+        tnuc = self.data.data['t_nuc_calc']
+        tend = self.data.data['t_end_calc']
+
+        ni = int(t*self.data.fps + tnuc)
+        if ni < tref or ni > tend:
+            raise ValueError('t is not in the interval [tref;tend]')
+
+        nc = int(t*self.data.fps + tnuc - tref)-1
+        log(nc)
+
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        color = 'tab:blue'
+        ax.imshow(self.get_image(ni).image)
+
+        if front:
+            x, y = self.front.x[nc], self.front.y[nc]
+            ax.plot(
+                x, y,
+                ls='--', color=color, alpha=.5
+            )
+        if contour:
+            x1, y1 = self.contour.xl[nc], self.contour.yl[nc]
+            x2, y2 = self.contour.xr[nc], self.contour.yr[nc]
+            ax.plot(
+                x1, y1, x2, y2,
+                ls='--', color=color, alpha=.5
+            )
+        ax.ax.axis('off')
+        ax.title('t : {:.1f}s'.format(t))
+        ax.ax.grid(False)
+        fig.show()
+
+    # to check if to keep or to erase
     def view_propagation_front(self, zf):
         """Display front inclination over timeself."""
 
@@ -2021,7 +2137,7 @@ if __name__ == '__main__':
 
     # read an experiment
     # ==========
-    stack.read_by_date('22-10-2018', 7)
+    stack.read_by_date('15-10-2018', 1)
     # stack.print_info()
 
     # load the images
@@ -2048,15 +2164,18 @@ if __name__ == '__main__':
     # stack.track_contour()
     # stack.track_front()
 
+    stack.make_image()
+    stack.make_montage()
+    stack.contour.plot_tip_angle(stack.data.fps)
     stack.contour.plot()
     stack.contour.plot_volume()
     stack.front.plot(dt=1)
     stack.plot_vol_mean_front_comparison()
-    stack.front_profile(dt=2)
+    stack.front_profile(dt=1)
     stack.plot_dynamic_mean_front()
     stack.plot_mean_vs_loc_kinetics()
-    stack.fit_mean_kinetic(.7)
-    stack.make_montage()
+    f12, fbest = stack.plot_fit(.7)
+    log('fit t1/2 : ', f12)
     log(stack.get_t12(True))
     log(stack.get_tf(True))
     log(stack.get_tz0(True))

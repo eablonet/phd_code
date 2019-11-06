@@ -32,20 +32,36 @@ class Load:
         self.stack.append(st.Stack())
         self.stack[-1].read_by_date(date, serie)
 
-        self.stefan.append(ste.Stefan())
-        self.stefan[-1].solver = [0, 0, 2, 0]
-        self.stefan[-1].dilatation = True
-        self.stefan[-1].boundaries = [0, 0]
-        self.stefan[-1].set_geometry(H=[0, (self.stack[-1].geom.zb - self.stack[-1].geom.z0)/self.stack[-1].data.data['px_mm'], 0], unit='m')
-        self.stefan[-1].set_time_condition(auto=True)
-        self.stefan[-1].boundValues = [self.stack[-1].data.Tnuc, 0]
+    def kinetic(self, colorby='None'):
+        """Plot kinetics."""
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        cmap = plt.cm.get_cmap('tab20', len(self.stack))
 
+        for i, s in enumerate(self.stack):
+            ym, ystd = s.get_dynamic_mean_front()
+            t = np.arange(len(ym)) / s.data.fps
+            dt0 = int(
+                    s.data.data['t_nuc_calc'] - s.data.data['t_ref_calc']
+                ) / s.data.fps
 
-    def filter_db(self, criterium, value):
-        """Filter in data base."""
-        None
+            ax.plot(
+                (t-dt0)/s.get_tz0ste(), np.array(ym)/s.get_z0(usi=True),
+                c=cmap(i),
+                # c=cmap(phi[s.data.data['phi_cons']]),
+                ls='none', marker='o', mfc='none',
+                # label='__legend__' if leg[s.data.data['phi_cons']] else
+                # r'phi = {:.1f}'.format(s.data.data['phi_cons'])
+                label='T_w ; {:.0f}'.format(s.data.Tnuc)
+            )
+            # leg[s.data.data['phi_cons']] = True
 
-    def kinetic(self):
+        ax.xlabel(r'$t/t_{ste}$')
+        ax.ylabel(r'$z/z_0$')
+        ax.legend()
+        fig.show()
+
+    def kinetic_adim_tz0(self):
         """Plot kinetics."""
         fig = pl.Figure()
         ax = fig.add_ax(111)
@@ -58,29 +74,20 @@ class Load:
             dt0 = int(
                     s.data.data['t_nuc_calc'] - s.data.data['t_ref_calc']-1
                 ) / s.data.fps
-            # adim
-            # ax.plot(
-            #     (t-dt0)/s.get_tz0(), (np.array(ym)/(s.geom.zb - s.geom.z0)*s.data.data['px_mm']),
-            #     c=cmap(phi[s.data.data['phi_cons']]),
-            #     ls='-.', marker='v', mfc='none',
-            #     label='__legend__' if leg[s.data.data['phi_cons']] else
-            #     r'phi = {:.1f}'.format(s.data.data['phi_cons'])
-            # )
-            # usi
             ax.plot(
-                (t-dt0)/self.stefan[i].tz0, np.array(ym)/(s.geom.zb - s.geom.z0)*s.data.data['px_mm'],
+                (t-dt0)/s.get_tz0(usi=True), np.array(ym)/s.get_z0(),
                 c=cmap(phi[s.data.data['phi_cons']]),
                 ls='-.', marker='v', mfc='none',
                 label='__legend__' if leg[s.data.data['phi_cons']] else
                 r'phi = {:.1f}'.format(s.data.data['phi_cons'])
             )
             leg[s.data.data['phi_cons']] = True
-        ax.xlabel(r'$t/t_{ste}$')
+        ax.xlabel(r'$t/t_{z_0}$')
         ax.ylabel(r'$z/z_0$')
         ax.legend()
         fig.show()
 
-    def kinetic_adim_zO_tz0(self):
+    def kinetic_adim_tste(self):
         """Plot kinetics."""
         fig = pl.Figure()
         ax = fig.add_ax(111)
@@ -114,6 +121,52 @@ class Load:
         ax.xlabel(r'$t/t_{z_0}$')
         ax.ylabel(r'$z/z_0$')
         ax.legend()
+        fig.show()
+
+    def kinetic_adim_tf(self):
+        """Plot kinetics."""
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        cmap = plt.cm.get_cmap('tab20c', 4)
+        phi = {40: 0, 50: 1, 60: 2, 70: 3}
+        leg = {40: False, 50: False, 60: False, 70: False}
+        for i, s in enumerate(self.stack):
+            ym, ystd = s.get_dynamic_mean_front()
+            t = np.arange(len(ym)) / s.data.fps
+            dt0 = int(
+                    s.data.data['t_nuc_calc'] - s.data.data['t_ref_calc']-1
+                ) / s.data.fps
+            # adim
+            # ax.plot(
+            #     (t-dt0)/s.get_tz0(), (np.array(ym)/(s.geom.zb - s.geom.z0)*s.data.data['px_mm']),
+            #     c=cmap(phi[s.data.data['phi_cons']]),
+            #     ls='-.', marker='v', mfc='none',
+            #     label='__legend__' if leg[s.data.data['phi_cons']] else
+            #     r'phi = {:.1f}'.format(s.data.data['phi_cons'])
+            # )
+            # usi
+            z0 = (s.geom.zb - s.geom.z0)/s.data.data['px_mm']
+            ax.plot(
+                (t-dt0)/s.get_tz0(usi=True), np.array(ym)/z0,
+                c=cmap(phi[s.data.data['phi_cons']]),
+                ls='-.', marker='v', mfc='none',
+                label='__legend__' if leg[s.data.data['phi_cons']] else
+                r'phi = {:.1f}'.format(s.data.data['phi_cons'])
+            )
+            leg[s.data.data['phi_cons']] = True
+        ax.xlabel(r'$t/t_{z_0}$')
+        ax.ylabel(r'$z/z_0$')
+        ax.legend()
+        fig.show()
+
+    def tip_angle(self):
+        """Plot tip angle."""
+        fig = pl.Figure()
+        ax = fig.add_ax(111)
+        for s in self.stack:
+            alpha = s.contour.tip_angle()
+            amin = np.min(alpha)
+            ax.plot(s.data.data['phi_cons'], amin, 's')
         fig.show()
 
     def tz0_repr(self, param='phi_int'):
@@ -179,8 +232,8 @@ class Load:
         Tamax = []
         for i, s in enumerate(self.stack):
             phi.append(np.float(s.data.data['phi_chamber'].replace(',', '.')))
-            s.get_qa()
-            Tamax.append(np.max(s.stefan.fields.T))
+            T = s.get_T_for_airflux()
+            Tamax.append(np.max(T))
 
         ax.plot(phi, np.abs(Tamax), 'sk', mfc='None')
         ax.xlabel(r'$\phi$ (%)')
@@ -203,14 +256,17 @@ if __name__ == '__main__':
         # 5, 7, 9,
         # 3, 5
     ]
-
+    # date = ['20-11-2017']*6
+    # serie = range(1, 7)
+    # date\= [5, 2, 5, 2]
     gest = Load()
     for i in range(len(date)):
         print(date[i], serie[i])
         gest.add_path(date[i], serie[i])
 
-    gest.kinetic()
-    gest.kinetic_adim_zO_tz0()
-    gest.tz0_repr()
-    gest.qa_phi()
-    gest.Ta_max_phi()
+    # gest.kinetic()
+    # gest.kinetic_adim_zO_tz0()
+    # gest.tz0_repr()
+    # gest.qa_phi()
+    # gest.Ta_max_phi()
+    gest.tip_angle()

@@ -1729,6 +1729,8 @@ class SpatioContourTrack(object):
         self.n_selected_ax = 0
         self.press_key = None
 
+        self.interp_mode = 'cubic'
+
         # Generate main figure
         # --------------
         self.generate_home()
@@ -1749,7 +1751,7 @@ class SpatioContourTrack(object):
         """Define the main figure."""
         # declare main figure
         # ------------
-        self.main_fig = plt.figure(figsize=(16, 9))
+        self.main_fig = plt.figure(figsize=(16, 9), constrained_layout=True)
         self.main_fig.canvas.set_window_title(
             'Contour detection thanks to spatio'
         )
@@ -1828,7 +1830,9 @@ class SpatioContourTrack(object):
 
         # interpolated lines
         # -----------------
-        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        x, y = self.curves[self.n_selected_ax].get_interpolation(
+            kind=self.interp_mode
+        )
         self.main_interpolatedLines = self.main_ax[3].plot(
             x, y,
             ls='-.', marker='None',
@@ -1867,12 +1871,16 @@ class SpatioContourTrack(object):
             contourCurve_left = Point()
             contourCurve_right = Point()
             for i in range(3):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_left.add_point(self.range_r[i], y)
             for i in range(2, 5):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_right.add_point(self.range_r[i], y)
@@ -1905,7 +1913,9 @@ class SpatioContourTrack(object):
 
         # display interpolation
         # --------------------
-        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        x, y = self.curves[self.n_selected_ax].get_interpolation(
+            kind=self.interp_mode
+        )
         self.main_interpolatedLines.set_data(x, y)
 
         # update image figures
@@ -1914,12 +1924,16 @@ class SpatioContourTrack(object):
             contourCurve_left = Point()
             contourCurve_right = Point()
             for i in range(3):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_left.add_point(self.range_r[i], y)
             for i in range(2, 5):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[self.image_t[k] - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_right.add_point(self.range_r[i], y)
@@ -1976,7 +1990,9 @@ class SpatioContourTrack(object):
 
         # interpolated lines
         # -----------------
-        x, y = self.curves[self.n_selected_ax].get_interpolation()
+        x, y = self.curves[self.n_selected_ax].get_interpolation(
+            kind=self.interp_mode
+        )
         self.main_interpolatedLines.set_data(
             x, y,
         )
@@ -2108,6 +2124,16 @@ class SpatioContourTrack(object):
             self.press_key = None
             return
 
+        if self.press_key == 'l':
+            """Change spline interpolation mode."""
+            switch = {
+                'cubic': 'slinear',
+                'slinear': 'quadratic',
+                'quadratic': 'cubic'
+            }
+            self.interp_mode = switch[self.interp_mode]
+            self.update_fig()
+
         # move start/end point
         # -------------
         cond = False
@@ -2155,12 +2181,16 @@ class SpatioContourTrack(object):
             contourCurve_left = Point()
             contourCurve_right = Point()
             for i in range(3):
-                x, y = self.curves[i].get_interpolation()
+                x, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[t - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_left.add_point(self.range_r[i], y)
             for i in range(2, 5):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[t - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_right.add_point(self.range_r[i], y)
@@ -2188,7 +2218,9 @@ class SpatioContourTrack(object):
         """Calculate the volume cross time."""
         vol = []  # init vector volume
         # vol2 = []  # init vector volume
-        _, zc = self.curves[2].get_interpolation()
+        _, zc = self.curves[2].get_interpolation(
+            kind=self.interp_mode
+        )
         zc = self.zb - (zc + self.dz)
         # loop on time
         for t in range(self.t_nuc, self.t_end+1):
@@ -2198,12 +2230,16 @@ class SpatioContourTrack(object):
             contourCurve_left = Point()
             contourCurve_right = Point()
             for i in range(3):
-                x, y = self.curves[i].get_interpolation()
+                x, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[t - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_left.add_point(self.range_r[i], y)
             for i in range(2, 5):
-                _, y = self.curves[i].get_interpolation()
+                _, y = self.curves[i].get_interpolation(
+                    kind=self.interp_mode
+                )
                 y = int(y[t - self.t_nuc]) + self.dz
                 # dz correct the crop of spatios
                 contourCurve_right.add_point(self.range_r[i], y)
@@ -2224,15 +2260,6 @@ class SpatioContourTrack(object):
 
             vol.append(volume_calc)
 
-            # other calcul
-            # ------
-            # x, y = contourCurve_left.get_interpolation_r()
-            # x1, y1 = contourCurve_right.get_interpolation_r()
-            # volume_calc = np.pi/2 * (
-            #     np.sum(np.power(self.rc - x, 2)) +
-            #     np.sum(np.power(x1 - self.rc, 2))
-            # )
-            # vol2.append(volume_calc)
         return vol, zc
 
 
